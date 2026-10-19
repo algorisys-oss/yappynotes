@@ -13,6 +13,14 @@ public class TodoItemsTests
         Assert.Equal(["milk", "oat"], items.Select(item => item.Text));
     }
 
+    [Fact]
+    public void OpenItems_WithABoxInsideCode_DoesNotCreateATodo()
+    {
+        var items = TodoList.OpenItems("- [ ] outside\n```\n- [ ] inside code\n```\n- [x] done");
+
+        Assert.Equal("outside", Assert.Single(items).Text);
+    }
+
     /// <summary>A list elsewhere shows words, not the Markdown around them.</summary>
     [Fact]
     public void OpenItems_WithFormattingInTheText_GiveThePlainWords()

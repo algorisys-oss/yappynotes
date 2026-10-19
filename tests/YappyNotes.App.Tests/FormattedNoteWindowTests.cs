@@ -5,8 +5,10 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Media;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using Microsoft.Extensions.Time.Testing;
 using YappyNotes.App.Views;
 using YappyNotes.Core;
@@ -122,6 +124,115 @@ public class FormattedNoteWindowTests
         var window = OpenWith("# Today\nmilk");
 
         Assert.True(Line(window, 0).FontSize > Line(window, 1).FontSize);
+    }
+
+    [AvaloniaFact]
+    public void FormattedNote_AFencedBlock_ShowsCodeWithoutFences()
+    {
+        var window = OpenWith("before\n```cs\n  first();\n  second();\n```\nafter");
+
+        var code = Assert.Single(Formatted(window).GetVisualDescendants().OfType<TextBlock>(),
+            text => text.Tag is NoteLine { Block.Kind: MarkdownBlockKind.CodeFence });
+        var drawn = !string.IsNullOrEmpty(code.Text) ? code.Text : DrawnText(code);
+
+        Assert.Equal("  first();\n  second();\n", drawn);
+    }
+
+    [AvaloniaFact]
+    public void FormattedNote_AFenceWithLanguage_ShowsItsLabel()
+    {
+        var window = OpenWith("```csharp\nvar x = 1;\n```");
+
+        Assert.Contains(Formatted(window).GetVisualDescendants().OfType<TextBlock>(),
+            text => text.Text == "csharp");
+    }
+
+    [AvaloniaFact]
+    public async Task Copy_OnAFencedBlock_CopiesOnlyTheLiteralCode()
+    {
+        const string code = "  x = 1;\r\n\treturn x;\r\n";
+        var window = OpenWith("before\n```csharp\r\n" + code + "```\nafter");
+        var clipboard = window.Clipboard!;
+        await clipboard.SetTextAsync("previous clipboard text");
+        var copy = Assert.Single(Formatted(window).GetVisualDescendants().OfType<Button>(),
+            button => button.Content is "Copy" or TextBlock { Text: "Copy" });
+        var centre = copy.TranslatePoint(new Point(copy.Bounds.Width / 2, copy.Bounds.Height / 2), window)!.Value;
+
+        window.MouseDown(centre, MouseButton.Left);
+        window.MouseUp(centre, MouseButton.Left);
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(code, await clipboard.TryGetTextAsync());
+    }
+
+    [AvaloniaFact]
+    public void Copy_OnAnEmptyFencedBlock_IsDisabled()
+    {
+        var window = OpenWith("```\n```");
+
+        var copy = Assert.Single(Formatted(window).GetVisualDescendants().OfType<Button>(),
+            button => button.Content is "Copy" or TextBlock { Text: "Copy" });
+
+        Assert.False(copy.IsEnabled);
+    }
+
+    [AvaloniaFact]
+    public void FormattedNote_ALongCodeLine_DoesNotWrap()
+    {
+        var window = OpenWith("```\n" + new string('W', 200) + "\n```");
+        var code = Assert.Single(Formatted(window).GetVisualDescendants().OfType<TextBlock>(),
+            text => text.Tag is NoteLine { Block.Kind: MarkdownBlockKind.CodeFence });
+        var scroll = code.GetVisualAncestors().OfType<ScrollViewer>().First();
+
+        Assert.Contains("Mono", code.FontFamily.Name, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(TextWrapping.NoWrap, code.TextWrapping);
+        Assert.Equal(ScrollBarVisibility.Auto, scroll.HorizontalScrollBarVisibility);
+        Assert.True(scroll.Extent.Width > scroll.Viewport.Width,
+            $"code extent {scroll.Extent.Width} should exceed viewport {scroll.Viewport.Width}");
+    }
+
+    [AvaloniaFact]
+    public void PressingCodeText_OpensTheEditorAtTheClickedCharacter()
+    {
+        const string content = "before\n```cs\n  hello();\n```\nafter";
+        var window = OpenWith(content);
+        var code = Assert.Single(Formatted(window).GetVisualDescendants().OfType<TextBlock>(),
+            text => text.Tag is NoteLine { Block.Kind: MarkdownBlockKind.CodeFence });
+
+        Press(window, code, "  he".Length);
+
+        Assert.True(Editor(window).IsEffectivelyVisible);
+        Assert.Equal(content.IndexOf("hello", StringComparison.Ordinal) + 2, Editor(window).CaretIndex);
+    }
+
+    [AvaloniaFact]
+    public async Task CopyButton_DoesNotOpenTheEditorOrChangeTheNote()
+    {
+        const string content = "```cs\nvar answer = 42;\n```";
+        var repository = new CountingNoteRepository(new InMemoryNoteRepository());
+        var notes = new NoteService(repository, _clock);
+        var autoSave = new AutoSaveService(notes, _clock, TimeSpan.FromMilliseconds(750));
+        var note = await notes.CreateAsync();
+        note.Content = content;
+        await notes.SaveAsync(note);
+        var window = new NoteWindow(new NoteViewModel(
+            note, notes, autoSave, new FakeWindowManager(), _clock, new InlineUiDispatcher(), _links));
+        window.Show();
+        Dispatcher.UIThread.RunJobs();
+        var updatesBeforeClick = repository.Updates;
+        var copy = Assert.Single(Formatted(window).GetVisualDescendants().OfType<Button>(),
+            button => button.Content is "Copy" or TextBlock { Text: "Copy" });
+        var centre = copy.TranslatePoint(new Point(copy.Bounds.Width / 2, copy.Bounds.Height / 2), window)!.Value;
+
+        window.MouseDown(centre, MouseButton.Left);
+        window.MouseUp(centre, MouseButton.Left);
+        Dispatcher.UIThread.RunJobs();
+        await autoSave.FlushAllAsync();
+
+        Assert.True(ShowsFormatted(window));
+        Assert.False(Editor(window).IsEffectivelyVisible);
+        Assert.Equal(content, NoteOf(window).Content);
+        Assert.Equal(updatesBeforeClick, repository.Updates);
     }
 
     [AvaloniaFact]

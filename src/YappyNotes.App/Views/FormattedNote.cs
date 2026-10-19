@@ -1,8 +1,11 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Documents;
+using Avalonia.Data;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Media;
+using Avalonia.VisualTree;
 using YappyNotes.App;
 using YappyNotes.Core;
 using YappyNotes.ViewModels;
@@ -104,16 +107,20 @@ public sealed class FormattedNote : StackPanel
             return;
         }
 
-        var position = e.GetPosition(this);
-
-        foreach (var child in Children)
+        foreach (var text in this.GetVisualDescendants().OfType<TextBlock>())
         {
-            if (child is not TextBlock { Tag: NoteLine line } text || !text.Bounds.Contains(position))
+            if (text.Tag is not NoteLine line)
             {
                 continue;
             }
 
-            var hit = text.TextLayout.HitTestPoint(position - text.Bounds.Position);
+            var position = e.GetPosition(text);
+            if (!new Rect(text.Bounds.Size).Contains(position))
+            {
+                continue;
+            }
+
+            var hit = text.TextLayout.HitTestPoint(position);
 
             // Past the end of the line's text there is no character under the
             // pointer, so no box or link either: it is a press at the line's end.
@@ -128,6 +135,81 @@ public sealed class FormattedNote : StackPanel
 
     private static int DrawnLength(NoteLine line) => line.Marker.Length + line.Block.Runs.Sum(run => run.Text.Length);
 
+    private async Task CopyCodeAsync(string code)
+    {
+        if (code.Length == 0)
+        {
+            return;
+        }
+
+        var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+        if (clipboard is not null)
+        {
+            await clipboard.SetTextAsync(code);
+        }
+    }
+
+    private Control DrawCode(NoteLine line)
+    {
+        var code = string.Concat(line.Block.Runs.Select(run => run.Text));
+        var copy = new Button
+        {
+            Content = "Copy",
+            IsEnabled = code.Length > 0,
+            Padding = new Thickness(5, 1),
+        };
+        copy.Click += async (_, _) => await CopyCodeAsync(code);
+
+        var header = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
+        if (line.Block.Language is { } language)
+        {
+            header.Children.Add(new TextBlock
+            {
+                Text = language,
+                FontFamily = Monospace,
+                VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+            });
+        }
+
+        Grid.SetColumn(copy, 1);
+        header.Children.Add(copy);
+
+        var codeText = new TextBlock
+        {
+            Tag = line,
+            Text = code,
+            FontFamily = Monospace,
+            FontSize = BaseFontSize,
+            TextWrapping = TextWrapping.NoWrap,
+        };
+
+        var scroll = new ScrollViewer
+        {
+            Content = codeText,
+            HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
+            VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
+        };
+
+        var content = new StackPanel();
+        content.Children.Add(header);
+        content.Children.Add(scroll);
+
+        var container = new Border
+        {
+            Tag = line,
+            Child = content,
+            CornerRadius = new CornerRadius(4),
+            Margin = new Thickness(0, 2),
+            Padding = new Thickness(6, 4),
+        };
+        container.Bind(Border.BackgroundProperty, new Binding(nameof(NoteViewModel.Color))
+        {
+            Converter = NoteBrushes.CodePaper,
+        });
+
+        return container;
+    }
+
     /// <summary>
     /// Redraws the lines around the add row without ever taking the row out. Removing
     /// it would take the keyboard off a to-do being typed every time an item is added
@@ -135,7 +217,7 @@ public sealed class FormattedNote : StackPanel
     /// </summary>
     private void Rebuild()
     {
-        foreach (var drawn in Children.OfType<TextBlock>().Where(child => child.Tag is NoteLine).ToList())
+        foreach (var drawn in Children.Where(child => child.Tag is NoteLine).ToList())
         {
             Children.Remove(drawn);
         }
@@ -163,9 +245,14 @@ public sealed class FormattedNote : StackPanel
         }
     }
 
-    private static TextBlock Draw(NoteLine line)
+    private Control Draw(NoteLine line)
     {
         var block = line.Block;
+        if (block.Kind == MarkdownBlockKind.CodeFence)
+        {
+            return DrawCode(line);
+        }
+
         var text = new TextBlock
         {
             Tag = line,

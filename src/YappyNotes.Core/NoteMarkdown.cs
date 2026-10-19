@@ -11,6 +11,9 @@ public enum MarkdownBlockKind
 
     /// <summary>A checklist item, <c>- [ ]</c> or <c>- [x]</c>.</summary>
     Task,
+
+    /// <summary>A fenced block of literal code.</summary>
+    CodeFence,
 }
 
 [Flags]
@@ -36,9 +39,9 @@ public enum RunStyle
 /// <param name="Due">The date this is, if it is a to-do's due date: <c>@2026-09-20</c>.</param>
 public sealed record MarkdownRun(string Text, int SourceStart, RunStyle Style = RunStyle.None, Uri? Link = null, DateOnly? Due = null);
 
-/// <summary>One line of a note, parsed.</summary>
-/// <param name="SourceStart">Where the line starts in the note's content.</param>
-/// <param name="SourceLength">The line's length, without its line break.</param>
+/// <summary>One parsed block of a note.</summary>
+/// <param name="SourceStart">Where the block starts in the note's content.</param>
+/// <param name="SourceLength">The block's length; for a code fence, this includes both fences.</param>
 /// <param name="Level">A heading's level, or a list item's depth of indentation.</param>
 /// <param name="TextStart">
 /// Where the line's own text begins in the note, past any heading, bullet or
@@ -48,6 +51,7 @@ public sealed record MarkdownRun(string Text, int SourceStart, RunStyle Style = 
 /// For a task, the index of the character between its brackets - what
 /// <see cref="NoteMarkdown.ToggleTask"/> rewrites. -1 for anything else.
 /// </param>
+/// <param name="Language">An optional code fence label; null for other blocks.</param>
 public sealed record MarkdownBlock(
     MarkdownBlockKind Kind,
     IReadOnlyList<MarkdownRun> Runs,
@@ -56,11 +60,12 @@ public sealed record MarkdownBlock(
     int Level = 0,
     bool IsDone = false,
     int CheckMarkIndex = -1,
-    int TextStart = 0);
+    int TextStart = 0,
+    string? Language = null);
 
 /// <summary>
 /// The small piece of Markdown a note understands: headings, bullets, checklists,
-/// bold, italic, code and links.
+/// bold, italic, inline and fenced code, and links.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -70,10 +75,11 @@ public sealed record MarkdownBlock(
 /// only decides how that text is drawn.
 /// </para>
 /// <para>
-/// Two departures from Markdown proper, both for a sticky note. Every line is its
-/// own block - Markdown joins neighbouring lines into one paragraph, which on a
-/// note reads as the app eating your line breaks. And nothing is ever an error:
-/// anything that does not parse is shown as the characters that were typed.
+/// Two departures from Markdown proper, both for a sticky note. Outside fenced
+/// code, every line is its own block - Markdown joins neighbouring lines into
+/// one paragraph, which on a note reads as the app eating your line breaks.
+/// And nothing is ever an error: anything that does not parse is shown as the
+/// characters that were typed.
 /// </para>
 /// <para>
 /// A subset on purpose. Tables, images, numbered lists and HTML are not coming;
@@ -100,6 +106,57 @@ public static class NoteMarkdown
                 length--;
             }
 
+            if (TryOpeningFence(content.AsSpan(lineStart, length), out var language))
+            {
+                var codeStart = newline < 0 ? content.Length : newline + 1;
+                var codeEnd = content.Length;
+                var sourceEnd = content.Length;
+                var nextLineStart = content.Length + 1;
+
+                for (var scanStart = codeStart; scanStart < content.Length;)
+                {
+                    var scanNewline = content.IndexOf('\n', scanStart);
+                    var scanEnd = scanNewline < 0 ? content.Length : scanNewline;
+                    var scanLength = scanEnd - scanStart;
+
+                    if (scanLength > 0 && content[scanEnd - 1] == '\r')
+                    {
+                        scanLength--;
+                    }
+
+                    if (IsClosingFence(content.AsSpan(scanStart, scanLength)))
+                    {
+                        codeEnd = scanStart;
+                        sourceEnd = scanEnd;
+                        nextLineStart = scanNewline < 0 ? content.Length + 1 : scanNewline + 1;
+                        break;
+                    }
+
+                    if (scanNewline < 0)
+                    {
+                        break;
+                    }
+
+                    scanStart = scanNewline + 1;
+                }
+
+                blocks.Add(new MarkdownBlock(
+                    MarkdownBlockKind.CodeFence,
+                    [new MarkdownRun(content[codeStart..codeEnd], codeStart)],
+                    lineStart,
+                    sourceEnd - lineStart,
+                    TextStart: codeStart,
+                    Language: language));
+
+                if (nextLineStart > content.Length)
+                {
+                    break;
+                }
+
+                lineStart = nextLineStart;
+                continue;
+            }
+
             blocks.Add(ParseLine(content, lineStart, length));
 
             if (newline < 0)
@@ -111,6 +168,39 @@ public static class NoteMarkdown
         }
 
         return blocks;
+    }
+
+    private static bool TryOpeningFence(ReadOnlySpan<char> line, out string? language)
+    {
+        language = null;
+
+        if (line.Length < 3 || line[0] != '`' || line[1] != '`' || line[2] != '`'
+            || (line.Length > 3 && line[3] == '`'))
+        {
+            return false;
+        }
+
+        var label = line[3..].Trim();
+        language = label.IsEmpty ? null : label.ToString();
+        return true;
+    }
+
+    private static bool IsClosingFence(ReadOnlySpan<char> line)
+    {
+        if (line.Length < 3 || line[0] != '`' || line[1] != '`' || line[2] != '`')
+        {
+            return false;
+        }
+
+        foreach (var character in line[3..])
+        {
+            if (character != ' ')
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /// <summary>

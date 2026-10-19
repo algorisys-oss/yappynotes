@@ -102,6 +102,15 @@ public class MarkdownEmphasisTests
         Assert.Equal("buy **|**", Bold("buy |"));
     }
 
+    [Theory]
+    [InlineData("```cs|\ncode\n```")]
+    [InlineData("```\nco|de\n```")]
+    [InlineData("```\ncode\n`|``")]
+    public void ToggleBold_WithTheCaretInsideCode_ChangesNothing(string marked)
+    {
+        Assert.Equal(marked, Bold(marked));
+    }
+
     [Fact]
     public void ToggleBold_WithTheCaretInAnEmptyPair_TakesThePairAway()
     {
@@ -117,6 +126,16 @@ public class MarkdownEmphasisTests
     public void ToggleBold_AcrossAChecklist_WrapsEachItemsTextAndNotItsBox()
     {
         Assert.Equal("- [ ] **«milk**\n- [ ] **bread»**", Bold("«- [ ] milk\n- [ ] bread»"));
+    }
+
+    [Fact]
+    public void ToggleBold_AcrossCode_FormatsOnlyOrdinaryBlocks()
+    {
+        var (content, start, end) = Parse("«before\n```\ncode\n```\nafter»");
+
+        var edit = MarkdownEmphasis.Toggle(content, start, end, Emphasis.Bold);
+
+        Assert.Equal("**before**\n```\ncode\n```\n**after**", edit.Content);
     }
 
     [Fact]

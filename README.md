@@ -61,6 +61,23 @@ closed, and the repository contract answered twice.
 >
 > 681 green tests. Start at [LOOP.md](LOOP.md).
 
+### Fenced code blocks
+
+Start a line with exactly three backticks to show literal code in a note. Close
+the block with three backticks on a line of their own. An optional language label
+follows the opening backticks:
+
+````markdown
+```csharp
+var answer = 42;
+```
+````
+
+The label appears above the code, without syntax highlighting. Long lines scroll
+horizontally. The **Copy** button copies only the code between the fences,
+preserving its spaces and line endings. The note still stores the original
+Markdown, including both fences and the optional label, in SQLite.
+
 ## Documentation
 
 | File | What it is |

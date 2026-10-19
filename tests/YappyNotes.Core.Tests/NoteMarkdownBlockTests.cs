@@ -41,6 +41,107 @@ public class NoteMarkdownBlockTests
     }
 
     [Fact]
+    public void Parse_ClosedFence_BecomesOneCodeBlock()
+    {
+        var blocks = NoteMarkdown.Parse("before\n```\n  one\n  two\n```\nafter");
+
+        Assert.Equal(
+            [MarkdownBlockKind.Paragraph, MarkdownBlockKind.CodeFence, MarkdownBlockKind.Paragraph],
+            blocks.Select(block => block.Kind));
+        Assert.Equal("before", TextOf(blocks[0]));
+        Assert.Equal("  one\n  two\n", TextOf(blocks[1]));
+        Assert.Equal("after", TextOf(blocks[2]));
+    }
+
+    [Fact]
+    public void Parse_FenceWithLanguage_KeepsTheLabelOutOfCode()
+    {
+        var block = Single("```python\nprint('oi')\n```");
+
+        Assert.Equal(MarkdownBlockKind.CodeFence, block.Kind);
+        Assert.Equal("python", block.Language);
+        Assert.Equal("print('oi')\n", Assert.Single(block.Runs).Text);
+    }
+
+    [Fact]
+    public void Parse_CodeBody_TreatsMarkdownAsLiteral()
+    {
+        const string code = "# Heading\n- [ ] task\n**bold** and `inline`\nhttps://example.com\n";
+        var block = Single("```\n" + code + "```");
+
+        Assert.Equal(MarkdownBlockKind.CodeFence, block.Kind);
+        var run = Assert.Single(block.Runs);
+        Assert.Equal(code, run.Text);
+        Assert.Equal(RunStyle.None, run.Style);
+        Assert.Null(run.Link);
+        Assert.Null(run.Due);
+    }
+
+    [Fact]
+    public void Parse_CodeBody_PreservesIndentationAndLineEndings()
+    {
+        const string content = "before\r\n```bash\r\n  echo hello  \r\n\tprintf done\r\n```\r\nafter";
+        var blocks = NoteMarkdown.Parse(content);
+
+        Assert.Equal(3, blocks.Count);
+        var code = Assert.Single(blocks[1].Runs).Text;
+        Assert.Equal("  echo hello  \r\n\tprintf done\r\n", code);
+        Assert.Equal(
+            content[content.IndexOf("  echo", StringComparison.Ordinal)..content.LastIndexOf("```", StringComparison.Ordinal)],
+            code);
+    }
+
+    [Fact]
+    public void Parse_UnclosedFence_ConsumesToEndOfNote()
+    {
+        const string content = "before\n```sql\nSELECT 1;\n- [ ] still code";
+        var blocks = NoteMarkdown.Parse(content);
+
+        Assert.Equal([MarkdownBlockKind.Paragraph, MarkdownBlockKind.CodeFence], blocks.Select(block => block.Kind));
+        Assert.Equal("sql", blocks[1].Language);
+        Assert.Equal("SELECT 1;\n- [ ] still code", Assert.Single(blocks[1].Runs).Text);
+        Assert.Equal(content.Length, blocks[1].SourceStart + blocks[1].SourceLength);
+    }
+
+    [Fact]
+    public void Parse_FenceWithTrailingText_StaysInsideCode()
+    {
+        var blocks = NoteMarkdown.Parse("```\nfirst\n``` still code\nsecond\n```\nafter");
+
+        Assert.Equal([MarkdownBlockKind.CodeFence, MarkdownBlockKind.Paragraph], blocks.Select(block => block.Kind));
+        Assert.Equal("first\n``` still code\nsecond\n", TextOf(blocks[0]));
+        Assert.Equal("after", TextOf(blocks[1]));
+    }
+
+    [Fact]
+    public void Parse_CodeRun_PointsToItsOriginalCharacters()
+    {
+        const string content = "before\n```python\r\n  x = 1\r\nprint(x)\r\n```\nafter";
+        var block = NoteMarkdown.Parse(content)[1];
+        var run = Assert.Single(block.Runs);
+
+        Assert.Equal(MarkdownBlockKind.CodeFence, block.Kind);
+        Assert.Equal(content.IndexOf("  x = 1", StringComparison.Ordinal), run.SourceStart);
+        Assert.Equal(block.TextStart, run.SourceStart);
+        Assert.Equal("  x = 1\r\nprint(x)\r\n", run.Text);
+
+        for (var index = 0; index < run.Text.Length; index++)
+        {
+            Assert.Equal(content[run.SourceStart + index], run.Text[index]);
+        }
+    }
+
+    [Fact]
+    public void Parse_BackticksInsideAParagraph_DoNotStartACodeBlock()
+    {
+        var blocks = NoteMarkdown.Parse("Use `git status` here\nKeep ```bash``` in this paragraph");
+
+        Assert.Equal([MarkdownBlockKind.Paragraph, MarkdownBlockKind.Paragraph], blocks.Select(block => block.Kind));
+        var inlineCode = Assert.Single(blocks[0].Runs, run => run.Style.HasFlag(RunStyle.Code));
+        Assert.Equal("git status", inlineCode.Text);
+    }
+
+    [Fact]
     public void Parse_AnEmptyLineBetweenTwo_IsKeptAsABlankBlock()
     {
         var blocks = NoteMarkdown.Parse("milk\n\nbread");

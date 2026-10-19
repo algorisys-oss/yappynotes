@@ -39,6 +39,15 @@ public static class MarkdownEmphasis
 
         var start = Math.Clamp(Math.Min(selectionStart, selectionEnd), 0, content.Length);
         var end = Math.Clamp(Math.Max(selectionStart, selectionEnd), 0, content.Length);
+
+        if (start == end && NoteMarkdown.Parse(content).Any(block =>
+                block.Kind == MarkdownBlockKind.CodeFence
+                && start >= block.SourceStart
+                && start <= block.SourceStart + block.SourceLength))
+        {
+            return new MarkdownEdit(content, selectionStart, selectionEnd);
+        }
+
         var width = emphasis == Emphasis.Bold ? 2 : 1;
 
         // A caret with nothing selected gets an empty pair to type into - or, sitting
@@ -119,6 +128,11 @@ public static class MarkdownEmphasis
 
         foreach (var block in NoteMarkdown.Parse(content))
         {
+            if (block.Kind == MarkdownBlockKind.CodeFence)
+            {
+                continue;
+            }
+
             var lineEnd = block.SourceStart + block.SourceLength;
             var s = Math.Max(start, block.TextStart);
             var e = Math.Min(end, lineEnd);

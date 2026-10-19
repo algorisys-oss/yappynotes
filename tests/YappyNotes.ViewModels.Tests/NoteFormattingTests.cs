@@ -197,6 +197,44 @@ public class NoteFormattingTests
     }
 
     [Fact]
+    public async Task SourceIndexAt_InsideCode_PointsToTheOriginalCharacter()
+    {
+        const string content = "```cs\nhello\nworld\n```";
+        var note = await NoteSayingAsync(content);
+
+        var line = Assert.Single(note.Lines);
+
+        Assert.Equal(content.IndexOf("world", StringComparison.Ordinal) + 2,
+            line.SourceIndexAt("hello\nwo".Length));
+    }
+
+    [Fact]
+    public async Task SourceIndexAt_AfterCodeText_StopsBeforeTheClosingFence()
+    {
+        const string content = "```\nhello\n```";
+        var note = await NoteSayingAsync(content);
+
+        var line = Assert.Single(note.Lines);
+        var renderedLength = Assert.Single(line.Block.Runs).Text.Length;
+
+        Assert.Equal(content.LastIndexOf("```", StringComparison.Ordinal),
+            line.SourceIndexAt(renderedLength));
+    }
+
+    [Fact]
+    public async Task PressAsync_OnCodeText_OpensTheEditorAtThatSourceIndex()
+    {
+        const string content = "before\n```cs\nhello\nworld\n```\nafter";
+        var note = await NoteSayingAsync(content);
+        var code = Assert.Single(note.Lines, line => line.Block.Kind == MarkdownBlockKind.CodeFence);
+
+        await note.PressAsync(code, renderedIndex: "hello\nwo".Length);
+
+        Assert.True(note.IsEditing);
+        Assert.Equal(content.IndexOf("world", StringComparison.Ordinal) + 2, note.EditCaret);
+    }
+
+    [Fact]
     public async Task BeginEditingAtEnd_PutsTheCaretAfterTheLastCharacter()
     {
         var note = await NoteSayingAsync("milk\nbread");

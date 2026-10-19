@@ -19,6 +19,8 @@ public sealed class NoteBrushes : IValueConverter
 
     public static NoteBrushes Edge { get; } = new() { _darker = true };
 
+    public static NoteBrushes CodePaper { get; } = new() { _codePaper = true };
+
     private static readonly Dictionary<NoteColor, Color> Papers = new()
     {
         [NoteColor.Yellow] = Color.FromRgb(0xFF, 0xF3, 0x9A),
@@ -30,6 +32,7 @@ public sealed class NoteBrushes : IValueConverter
     };
 
     private bool _darker;
+    private bool _codePaper;
 
     public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
     {
@@ -37,15 +40,16 @@ public sealed class NoteBrushes : IValueConverter
             ? found
             : Papers[NoteColor.Yellow];
 
-        return new SolidColorBrush(_darker ? Darken(paper) : paper);
+        var shade = _codePaper ? Darken(paper, 0.85) : _darker ? Darken(paper) : paper;
+        return new SolidColorBrush(shade);
     }
 
     public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
         => throw new NotSupportedException("A brush does not map back to a note colour.");
 
-    // The header strip, so it reads as part of the same piece of paper.
-    private static Color Darken(Color color) => Color.FromRgb(
-        (byte)(color.R * 0.88),
-        (byte)(color.G * 0.88),
-        (byte)(color.B * 0.88));
+    // Blend each channel with black; truncation preserves the existing edge shades.
+    private static Color Darken(Color color, double factor = 0.88) => Color.FromRgb(
+        (byte)(color.R * factor),
+        (byte)(color.G * factor),
+        (byte)(color.B * factor));
 }

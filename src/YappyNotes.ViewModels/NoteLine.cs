@@ -75,7 +75,9 @@ public sealed record NoteLine(MarkdownBlock Block, string Marker)
     /// </remarks>
     public int SourceIndexAt(int renderedIndex)
     {
-        var lineEnd = Block.SourceStart + Block.SourceLength;
+        var lineEnd = Block.Kind == MarkdownBlockKind.CodeFence && Block.Runs.Count > 0
+            ? Block.Runs[^1].SourceStart + Block.Runs[^1].Text.Length
+            : Block.SourceStart + Block.SourceLength;
 
         if (renderedIndex < Marker.Length)
         {

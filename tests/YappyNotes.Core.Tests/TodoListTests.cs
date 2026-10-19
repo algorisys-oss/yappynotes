@@ -141,4 +141,12 @@ public class TodoListTests
         Assert.Equal(MarkdownBlockKind.Task, added.Kind);
         Assert.False(added.IsDone);
     }
+
+    [Fact]
+    public void ClearCompleted_WithCodeAfterACompletedTask_PreservesTheWholeFence()
+    {
+        const string content = "- [x] done\n```bash\n- [x] literal code\n  printf hi\n```\nafter";
+
+        Assert.Equal("```bash\n- [x] literal code\n  printf hi\n```\nafter", TodoList.ClearCompleted(content));
+    }
 }
