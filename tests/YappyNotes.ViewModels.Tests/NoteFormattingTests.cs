@@ -79,6 +79,7 @@ public class NoteFormattingTests
         var note = await NoteSayingAsync("milk");
 
         Assert.False(note.ShowsEditor);
+        Assert.False(note.IsEditing);
     }
 
     /// <summary>
@@ -91,6 +92,53 @@ public class NoteFormattingTests
         var note = await NoteSayingAsync(string.Empty);
 
         Assert.True(note.ShowsEditor);
+        Assert.False(note.IsEditing);
+    }
+
+    [Fact]
+    public async Task ShowEdit_ThenShowPreview_SwitchesWithoutSaving()
+    {
+        var note = await NoteSayingAsync("milk");
+        var writesBefore = _counting.Updates;
+
+        note.ShowEdit();
+        Assert.True(note.IsEditing);
+        Assert.True(note.ShowsEditor);
+        Assert.Equal(4, note.EditCaret);
+
+        note.ShowPreview();
+        await SettleAsync();
+
+        Assert.False(note.IsEditing);
+        Assert.False(note.ShowsEditor);
+        Assert.Equal("milk", note.Content);
+        Assert.Equal(writesBefore, _counting.Updates);
+    }
+
+    [Fact]
+    public async Task ShowEdit_AfterPreview_RestoresTheLastCaret()
+    {
+        var note = await NoteSayingAsync("milk");
+        note.ShowEdit();
+        note.RememberEditCaret(2);
+        note.ShowPreview();
+
+        note.ShowEdit();
+
+        Assert.True(note.ShowsEditor);
+        Assert.Equal(2, note.EditCaret);
+    }
+
+    [Fact]
+    public async Task ShowPreview_OnAnEmptyNote_KeepsTheEditorReady()
+    {
+        var note = await NoteSayingAsync(string.Empty);
+
+        note.ShowPreview();
+
+        Assert.True(note.ShowsEditor);
+        Assert.False(note.IsEditing);
+        Assert.False(note.HasPreviewContent);
     }
 
     [Fact]

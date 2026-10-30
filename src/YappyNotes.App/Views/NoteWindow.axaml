@@ -117,6 +117,20 @@
             <Setter Property="HorizontalAlignment" Value="Stretch" />
             <Setter Property="HorizontalContentAlignment" Value="Left" />
         </Style>
+
+        <Style Selector="ToggleButton.mode">
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="Height" Value="22" />
+            <Setter Property="Padding" Value="6,1" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Foreground" Value="#333333" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+        <Style Selector="ToggleButton.mode:checked">
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Background" Value="#22000000" />
+        </Style>
     </Window.Styles>
 
     <Border x:Name="NoteChrome" BorderThickness="1">
@@ -394,6 +408,30 @@
             </Grid>
         </Border>
 
+        <!-- Keep mode controls inside the body; the title strip remains free to
+             drag a narrow note. Both views share the remaining body space. -->
+        <Grid Grid.Row="2" RowDefinitions="Auto,*">
+        <StackPanel Grid.Row="0"
+                    x:Name="ModeBar"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Right"
+                    Spacing="2"
+                    Margin="4,2,6,1">
+            <ToggleButton x:Name="EditModeButton"
+                          Classes="mode"
+                          Content="Edit"
+                          ToolTip.Tip="Edit Markdown source"
+                          IsChecked="{Binding ShowsEditor, Mode=OneWay}"
+                          Command="{Binding ShowEditCommand}" />
+            <ToggleButton x:Name="PreviewModeButton"
+                          Classes="mode"
+                          Content="Preview"
+                          ToolTip.Tip="Preview formatted note"
+                          IsChecked="{Binding !ShowsEditor, Mode=OneWay}"
+                          IsEnabled="{Binding HasPreviewContent}"
+                          Command="{Binding ShowPreviewCommand}" />
+        </StackPanel>
+
         <!-- The note at rest: its Markdown drawn formatted. A press on it either
              does something (a box, a link) or opens the editor below with the
              caret where the press landed. -->
@@ -401,7 +439,7 @@
              else on this paper - below a short note, in the padding - reaches the
              scroll viewer and opens the editor at the end. Transparent rather than
              unset, or those presses would fall through to nothing. -->
-        <ScrollViewer Grid.Row="2"
+        <ScrollViewer Grid.Row="1"
                       x:Name="FormattedScroll"
                       IsVisible="{Binding !ShowsEditor}"
                       Background="Transparent"
@@ -478,7 +516,7 @@
             </StackPanel>
         </ScrollViewer>
 
-        <TextBox Grid.Row="2"
+        <TextBox Grid.Row="1"
                  x:Name="Body"
                  IsVisible="{Binding ShowsEditor}"
                  Text="{Binding Content}"
@@ -491,6 +529,7 @@
                  Foreground="#1a1a1a"
                  Padding="8"
                  VerticalAlignment="Stretch" />
+        </Grid>
 
         <!-- While editing, the Markdown editor draws plain text and a link in it
              cannot be clicked, so the links are offered here instead. Formatted,

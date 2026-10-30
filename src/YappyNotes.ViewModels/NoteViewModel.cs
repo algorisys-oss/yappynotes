@@ -62,6 +62,7 @@ public sealed partial class NoteViewModel : ObservableObject
         _timeProvider = timeProvider ?? TimeProvider.System;
         _ui = ui ?? new ImmediateUiDispatcher();
         _links = links ?? new NoLinkLauncher();
+        EditCaret = note.Content.Length;
 
         AttachTimer();
         ScanForLinks();
@@ -88,6 +89,7 @@ public sealed partial class NoteViewModel : ObservableObject
             var typedIntoEmptyEditor = ShowsEditor && !IsEditing && !string.IsNullOrEmpty(value);
 
             Set(_note.Content, value, v => _note.Content = v);
+            OnPropertyChanged(nameof(HasPreviewContent));
 
             if (typedIntoEmptyEditor)
             {
@@ -147,8 +149,46 @@ public sealed partial class NoteViewModel : ObservableObject
     /// </remarks>
     public bool ShowsEditor => IsEditing || (string.IsNullOrWhiteSpace(_note.Content) && !IsAddingTodo && !CanUndoClear);
 
+    /// <summary>An empty note has nothing to render in Preview.</summary>
+    public bool HasPreviewContent => !string.IsNullOrWhiteSpace(_note.Content);
+
     /// <summary>Where the caret goes when the editor opens.</summary>
     public int EditCaret { get; private set; }
+
+    /// <summary>Keep the editor's caret when it gives focus to a control inside the note.</summary>
+    public void RememberEditCaret(int caret)
+    {
+        var next = Math.Clamp(caret, 0, _note.Content.Length);
+        if (EditCaret == next)
+        {
+            return;
+        }
+
+        EditCaret = next;
+        OnPropertyChanged(nameof(EditCaret));
+    }
+
+    /// <summary>Open the Markdown source in this note, at its last known caret.</summary>
+    [RelayCommand]
+    public void ShowEdit()
+    {
+        if (IsAddingTodo)
+        {
+            StopAddingTodos();
+        }
+
+        BeginEditing(EditCaret);
+    }
+
+    /// <summary>Render the note without moving focus to another window.</summary>
+    [RelayCommand]
+    public void ShowPreview()
+    {
+        if (HasPreviewContent)
+        {
+            EndEditing();
+        }
+    }
 
     /// <summary>
     /// A press on the formatted note. It ticks a checklist box, opens a link, or
@@ -415,8 +455,7 @@ public sealed partial class NoteViewModel : ObservableObject
 
     private void BeginEditing(int caret)
     {
-        EditCaret = Math.Clamp(caret, 0, _note.Content.Length);
-        OnPropertyChanged(nameof(EditCaret));
+        RememberEditCaret(caret);
         SetEditing(true);
     }
 

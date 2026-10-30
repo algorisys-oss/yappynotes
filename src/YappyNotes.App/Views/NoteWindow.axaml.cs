@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Media;
 using Avalonia.Input;
 using Avalonia.Markup.Xaml;
@@ -69,6 +70,25 @@ public partial class NoteWindow : Window
             // before anything bubbling would hear it.
             body.AddHandler(KeyDownEvent, OnBodyKeyDown, Avalonia.Interactivity.RoutingStrategies.Tunnel);
         }
+
+        this.FindControl<ToggleButton>("EditModeButton")!.Click += (_, _) =>
+            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            {
+                if (_note is { ShowsEditor: true } note && this.FindControl<TextBox>("Body") is { } editor)
+                {
+                    editor.Focus();
+                    editor.CaretIndex = note.EditCaret;
+                }
+            });
+
+        this.FindControl<ToggleButton>("PreviewModeButton")!.Click += (_, _) =>
+            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            {
+                if (_note is { ShowsEditor: false })
+                {
+                    GetTopLevel(this)?.FocusManager?.Focus(null);
+                }
+            });
 
         var adder = this.FindControl<TextBox>("TodoAdder");
         if (adder is not null)
@@ -348,7 +368,20 @@ public partial class NoteWindow : Window
     /// </summary>
     private void OnBodyLostFocus(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
+        if (sender is TextBox editor)
+        {
+            _note?.RememberEditCaret(editor.CaretIndex);
+        }
+
         if (sender is TextBox { ContextFlyout: Avalonia.Controls.Primitives.PopupFlyoutBase { IsOpen: true } })
+        {
+            return;
+        }
+
+        // The mode button's command performs the switch after it gets focus.
+        // Ending the edit here would swap the view before the click is processed.
+        if (this.FindControl<ToggleButton>("EditModeButton")?.IsFocused == true
+            || this.FindControl<ToggleButton>("PreviewModeButton")?.IsFocused == true)
         {
             return;
         }

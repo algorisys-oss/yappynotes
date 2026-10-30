@@ -86,6 +86,167 @@ public class FormattedNoteWindowTests
         Dispatcher.UIThread.RunJobs();
     }
 
+    private static void Click(NoteWindow window, Control control)
+    {
+        var centre = control.TranslatePoint(new Point(control.Bounds.Width / 2, control.Bounds.Height / 2), window)!.Value;
+        window.MouseDown(centre, MouseButton.Left);
+        window.MouseUp(centre, MouseButton.Left);
+        Dispatcher.UIThread.RunJobs();
+    }
+
+    [AvaloniaFact]
+    public void ModeButtons_OnAPinnedNote_SwitchInsideTheSameActiveWindow()
+    {
+        var window = OpenWith("milk");
+        var note = NoteOf(window);
+        note.IsAlwaysOnTop = true;
+        window.MarkActive(true);
+        Dispatcher.UIThread.RunJobs();
+
+        Click(window, window.FindControl<ToggleButton>("EditModeButton")!);
+
+        Assert.True(note.IsEditing);
+        Assert.True(Editor(window).IsEffectivelyVisible);
+        Assert.True(Editor(window).IsFocused);
+        Assert.False(ShowsFormatted(window));
+        Assert.True(window.Topmost);
+        Assert.True(window.IsActiveNote);
+
+        Click(window, window.FindControl<ToggleButton>("PreviewModeButton")!);
+
+        Assert.False(note.IsEditing);
+        Assert.False(Editor(window).IsEffectivelyVisible);
+        Assert.True(ShowsFormatted(window));
+        Assert.True(window.Topmost);
+        Assert.True(window.IsActiveNote);
+    }
+
+    [AvaloniaFact]
+    public void ModeButtons_AfterEditing_KeepTheLastCaretWhenReturning()
+    {
+        var window = OpenWith("buy milk");
+        Click(window, window.FindControl<ToggleButton>("EditModeButton")!);
+        var editor = Editor(window);
+        editor.CaretIndex = 4;
+
+        Click(window, window.FindControl<ToggleButton>("PreviewModeButton")!);
+        Click(window, window.FindControl<ToggleButton>("EditModeButton")!);
+
+        Assert.Equal(4, editor.CaretIndex);
+        Assert.True(editor.IsFocused);
+    }
+
+    [AvaloniaFact]
+    public void ModeButtons_OnAnEmptyNote_DisablePreviewAndKeepTypingReady()
+    {
+        var window = OpenWith(string.Empty);
+        var preview = window.FindControl<ToggleButton>("PreviewModeButton")!;
+
+        Assert.False(preview.IsEnabled);
+        Assert.True(Editor(window).IsFocused);
+        Assert.True(Editor(window).IsEffectivelyVisible);
+        Assert.False(ShowsFormatted(window));
+    }
+
+    [AvaloniaFact]
+    public void ModeButtons_AtMinimumSize_LeaveTheBodyAndTitleDragStripUsable()
+    {
+        var window = OpenWith("milk");
+        window.Width = 180;
+        window.Height = 140;
+        Dispatcher.UIThread.RunJobs();
+        var header = window.FindControl<Grid>("Header")!;
+        var bar = window.FindControl<StackPanel>("ModeBar")!;
+        var preview = window.FindControl<ScrollViewer>("FormattedScroll")!;
+        var headerBottom = header.TranslatePoint(new Point(0, header.Bounds.Height), window)!.Value.Y;
+        var barTop = bar.TranslatePoint(new Point(0, 0), window)!.Value.Y;
+
+        Assert.True(barTop >= headerBottom);
+        Assert.True(bar.Bounds.Width < window.ClientSize.Width);
+        Assert.True(preview.Viewport.Height > 0);
+        Assert.True(header.Bounds.Width > bar.Bounds.Width);
+    }
+
+    [AvaloniaFact]
+    public void ModeButtons_AfterPreview_EnterStillOpensTheEditor()
+    {
+        var window = OpenWith("milk");
+        Click(window, window.FindControl<ToggleButton>("EditModeButton")!);
+        Click(window, window.FindControl<ToggleButton>("PreviewModeButton")!);
+
+        window.KeyPress(Key.Enter, RawInputModifiers.None, PhysicalKey.Enter, null);
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.True(Editor(window).IsEffectivelyVisible);
+        Assert.True(Editor(window).IsFocused);
+        Assert.Equal("milk".Length, Editor(window).CaretIndex);
+    }
+
+    [AvaloniaFact]
+    public void ModeButtons_AfterPreview_CheckboxStillTicksInPlace()
+    {
+        var window = OpenWith("- [ ] milk");
+        Click(window, window.FindControl<ToggleButton>("EditModeButton")!);
+        Click(window, window.FindControl<ToggleButton>("PreviewModeButton")!);
+
+        Press(window, Line(window, 0), 0);
+
+        Assert.Equal("- [x] milk", NoteOf(window).Content);
+        Assert.True(ShowsFormatted(window));
+    }
+
+    [AvaloniaFact]
+    public void ModeButtons_AfterPreview_LinkStillOpensInPlace()
+    {
+        var window = OpenWith("see [the docs](https://example.com/docs)");
+        Click(window, window.FindControl<ToggleButton>("EditModeButton")!);
+        Click(window, window.FindControl<ToggleButton>("PreviewModeButton")!);
+
+        Press(window, Line(window, 0), "see th".Length);
+
+        Assert.Equal([new Uri("https://example.com/docs")], _links.Opened);
+        Assert.True(ShowsFormatted(window));
+    }
+
+    [AvaloniaFact]
+    public void ModeButtons_AfterPreview_ClickingTextStillOpensTheEditorAtThatText()
+    {
+        const string content = "buy **cold** milk";
+        var window = OpenWith(content);
+        Click(window, window.FindControl<ToggleButton>("EditModeButton")!);
+        Click(window, window.FindControl<ToggleButton>("PreviewModeButton")!);
+
+        Press(window, Line(window, 0), "buy co".Length);
+
+        Assert.True(Editor(window).IsFocused);
+        Assert.Equal(content.IndexOf("ld", StringComparison.Ordinal), Editor(window).CaretIndex);
+    }
+
+    [AvaloniaFact]
+    public void ModeButtons_AfterEdit_EscapeStillReturnsToPreview()
+    {
+        var window = OpenWith("milk");
+        Click(window, window.FindControl<ToggleButton>("EditModeButton")!);
+
+        window.KeyPress(Key.Escape, RawInputModifiers.None, PhysicalKey.Escape, null);
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.True(window.IsVisible);
+        Assert.True(ShowsFormatted(window));
+    }
+
+    [AvaloniaFact]
+    public void ModeButtons_AfterEdit_ClickingOutsideTheEditorStillShowsPreview()
+    {
+        var window = OpenWith("milk");
+        Click(window, window.FindControl<ToggleButton>("EditModeButton")!);
+
+        window.FindControl<ToggleButton>("PinButton")!.Focus();
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.True(ShowsFormatted(window));
+    }
+
     [AvaloniaFact]
     public void NoteWindow_ForANoteWithText_ShowsItFormattedRatherThanAsMarkdown()
     {
