@@ -1,3 +1,5 @@
+using System.Text;
+
 namespace YappyNotes.Core;
 
 /// <summary>What a line of a note is.</summary>
@@ -11,6 +13,9 @@ public enum MarkdownBlockKind
 
     /// <summary>A checklist item, <c>- [ ]</c> or <c>- [x]</c>.</summary>
     Task,
+
+    /// <summary>A standalone reference to a local image.</summary>
+    Image,
 }
 
 [Flags]
@@ -48,6 +53,8 @@ public sealed record MarkdownRun(string Text, int SourceStart, RunStyle Style = 
 /// For a task, the index of the character between its brackets - what
 /// <see cref="NoteMarkdown.ToggleTask"/> rewrites. -1 for anything else.
 /// </param>
+/// <param name="ImageDescription">The image's description, for an image block only.</param>
+/// <param name="ImageUri">The local file URI, for an image block only.</param>
 public sealed record MarkdownBlock(
     MarkdownBlockKind Kind,
     IReadOnlyList<MarkdownRun> Runs,
@@ -56,7 +63,9 @@ public sealed record MarkdownBlock(
     int Level = 0,
     bool IsDone = false,
     int CheckMarkIndex = -1,
-    int TextStart = 0);
+    int TextStart = 0,
+    string? ImageDescription = null,
+    Uri? ImageUri = null);
 
 /// <summary>
 /// The small piece of Markdown a note understands: headings, bullets, checklists,
@@ -76,7 +85,7 @@ public sealed record MarkdownBlock(
 /// anything that does not parse is shown as the characters that were typed.
 /// </para>
 /// <para>
-/// A subset on purpose. Tables, images, numbered lists and HTML are not coming;
+/// A subset on purpose. Tables, numbered lists and HTML are not coming;
 /// a note is a few lines to act on today.
 /// </para>
 /// </remarks>
@@ -147,6 +156,12 @@ public static class NoteMarkdown
             return new MarkdownBlock(MarkdownBlockKind.Blank, [], start, length, TextStart: start);
         }
 
+        if (TryParseImage(line, out var description, out var imageUri))
+        {
+            return new MarkdownBlock(MarkdownBlockKind.Image, [], start, length,
+                TextStart: start, ImageDescription: description, ImageUri: imageUri);
+        }
+
         var hashes = CountLeading(line, '#');
         if (hashes is >= 1 and <= 6 && hashes < line.Length && line[hashes] == ' ')
         {
@@ -175,6 +190,77 @@ public static class NoteMarkdown
 
         return Block(MarkdownBlockKind.Paragraph, start, length, textStart: start, content);
     }
+
+    private static bool TryParseImage(ReadOnlySpan<char> line, out string? description, out Uri? imageUri)
+    {
+        description = null;
+        imageUri = null;
+
+        if (!line.StartsWith("![", StringComparison.Ordinal) || line[^1] != ')')
+        {
+            return false;
+        }
+
+        var decodedDescription = new StringBuilder();
+        var descriptionEnd = -1;
+        for (var i = 2; i < line.Length; i++)
+        {
+            if (line[i] == '\\')
+            {
+                if (i + 1 >= line.Length || line[i + 1] is not ('\\' or ']'))
+                {
+                    return false;
+                }
+
+                decodedDescription.Append(line[++i]);
+            }
+            else if (line[i] == ']')
+            {
+                if (i + 1 >= line.Length || line[i + 1] != '(')
+                {
+                    return false;
+                }
+
+                descriptionEnd = i;
+                break;
+            }
+            else
+            {
+                decodedDescription.Append(line[i]);
+            }
+        }
+
+        if (descriptionEnd < 0)
+        {
+            return false;
+        }
+
+        var destination = line[(descriptionEnd + 2)..^1];
+        if (!destination.StartsWith("file:///", StringComparison.OrdinalIgnoreCase)
+            || destination.Length <= "file:///".Length
+            || destination["file:///".Length] == '/'
+            || destination.IndexOfAny("()?#\\".AsSpan()) >= 0
+            || destination.IndexOfAny(' ', '\t') >= 0
+            || !Uri.TryCreate(destination.ToString(), UriKind.Absolute, out var uri)
+            || !uri.IsFile
+            || uri.Host.Length != 0
+            || uri.AbsolutePath.StartsWith("//", StringComparison.Ordinal)
+            || !IsSupportedImageExtension(Path.GetExtension(uri.AbsolutePath)))
+        {
+            return false;
+        }
+
+        description = decodedDescription.ToString();
+        imageUri = uri;
+        return true;
+    }
+
+    private static bool IsSupportedImageExtension(string extension)
+        => extension.Equals(".png", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".jpg", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".jpeg", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".gif", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".webp", StringComparison.OrdinalIgnoreCase);
 
     private static MarkdownBlock Block(
         MarkdownBlockKind kind, int lineStart, int lineLength, int textStart, string content, int level = 0)
@@ -206,6 +292,20 @@ public static class NoteMarkdown
         while (i < end)
         {
             var c = content[i];
+
+            // An unsupported image reference stays literal, including an http:
+            // destination that could otherwise become a labelled or bare link.
+            if (c == '!' && i + 1 < end && content[i + 1] == '[')
+            {
+                var imageLabelEnd = content.AsSpan(i + 2, end - i - 2).IndexOf("](", StringComparison.Ordinal);
+                if (imageLabelEnd >= 0)
+                {
+                    var destinationStart = i + 2 + imageLabelEnd + 2;
+                    var imageEnd = content.IndexOf(')', destinationStart, end - destinationStart);
+                    i = imageEnd < 0 ? end : imageEnd + 1;
+                    continue;
+                }
+            }
 
             if (addresses.TryGetValue(i, out var address))
             {

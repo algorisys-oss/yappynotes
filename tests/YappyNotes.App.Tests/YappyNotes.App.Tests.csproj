@@ -30,4 +30,8 @@
     <ProjectReference Include="..\YappyNotes.TestKit\YappyNotes.TestKit.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Update="Fixtures\Images\*" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

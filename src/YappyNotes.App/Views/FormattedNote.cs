@@ -1,4 +1,5 @@
 using Avalonia;
+using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Controls.Documents;
 using Avalonia.Input;
@@ -50,6 +51,8 @@ public sealed class FormattedNote : StackPanel
     private static readonly IBrush DoneBrush = new SolidColorBrush(Color.FromRgb(0x6A, 0x6A, 0x6A));
     private static readonly IBrush CodeBrush = new SolidColorBrush(Color.FromArgb(0x18, 0x00, 0x00, 0x00));
     private static readonly FontFamily Monospace = new("Cascadia Mono, Consolas, DejaVu Sans Mono, Menlo, monospace");
+    private NoteImageSession? _images;
+    private Size _imageViewport;
 
     public FormattedNote()
     {
@@ -76,6 +79,30 @@ public sealed class FormattedNote : StackPanel
         get => GetValue(AddRowPositionProperty);
         set => SetValue(AddRowPositionProperty, value);
     }
+
+    public NoteImageSession? Images
+    {
+        get => _images;
+        set
+        {
+            if (_images == value) return;
+            _images = value;
+            Rebuild();
+        }
+    }
+
+    public Size ImageViewport
+    {
+        get => _imageViewport;
+        set
+        {
+            if (_imageViewport == value) return;
+            _imageViewport = value;
+            Rebuild();
+        }
+    }
+
+    public void RefreshImages() => Rebuild();
 
     /// <summary>A character of a line was pressed.</summary>
     public event EventHandler<LinePressedEventArgs>? LinePressed;
@@ -108,6 +135,14 @@ public sealed class FormattedNote : StackPanel
 
         foreach (var child in Children)
         {
+            if (child is Border { Tag: NoteLine { Block.Kind: MarkdownBlockKind.Image } imageLine } image
+                && image.Bounds.Contains(position))
+            {
+                LinePressed?.Invoke(this, new LinePressedEventArgs(imageLine, 0, false));
+                e.Handled = true;
+                return;
+            }
+
             if (child is not TextBlock { Tag: NoteLine line } text || !text.Bounds.Contains(position))
             {
                 continue;
@@ -135,7 +170,7 @@ public sealed class FormattedNote : StackPanel
     /// </summary>
     private void Rebuild()
     {
-        foreach (var drawn in Children.OfType<TextBlock>().Where(child => child.Tag is NoteLine).ToList())
+        foreach (var drawn in Children.Where(child => child.Tag is NoteLine).ToList())
         {
             Children.Remove(drawn);
         }
@@ -163,9 +198,14 @@ public sealed class FormattedNote : StackPanel
         }
     }
 
-    private static TextBlock Draw(NoteLine line)
+    private Control Draw(NoteLine line)
     {
         var block = line.Block;
+        if (block.Kind == MarkdownBlockKind.Image)
+        {
+            return DrawImage(line);
+        }
+
         var text = new TextBlock
         {
             Tag = line,
@@ -189,6 +229,57 @@ public sealed class FormattedNote : StackPanel
         }
 
         return text;
+    }
+
+    private Border DrawImage(NoteLine line)
+    {
+        var description = string.IsNullOrWhiteSpace(line.Block.ImageDescription)
+            ? "image" : line.Block.ImageDescription;
+        var result = line.Block.ImageUri is { } uri ? Images?.Get(uri) : null;
+        Control content;
+        if (result is { Status: ImageLoadStatus.Ready, Bitmap: { } bitmap })
+        {
+            var size = ImageDisplaySize(result.NaturalSize, ImageViewport);
+            content = new Image
+            {
+                Source = bitmap,
+                Width = size.Width,
+                Height = size.Height,
+                Stretch = Stretch.Fill,
+                HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Left,
+            };
+        }
+        else
+        {
+            content = new TextBlock
+            {
+                Text = result is null ? $"Loading image: {description}" : $"Image unavailable: {description}",
+                TextWrapping = TextWrapping.Wrap,
+                FontSize = BaseFontSize,
+                Foreground = MarkerBrush,
+                MinHeight = BaseFontSize * 1.35,
+            };
+        }
+
+        var container = new Border
+        {
+            Tag = line,
+            Child = content,
+            Background = Brushes.Transparent,
+            Margin = new Thickness(0, 2, 0, 4),
+            Cursor = new Cursor(StandardCursorType.Hand),
+        };
+        AutomationProperties.SetName(container, description);
+        return container;
+    }
+
+    internal static Size ImageDisplaySize(PixelSize natural, Size viewport)
+    {
+        var scale = Math.Min(1d, Math.Min(
+            LocalImageLoader.MaxDisplaySide / (double)Math.Max(natural.Width, natural.Height),
+            Math.Min(viewport.Width / natural.Width, viewport.Height / natural.Height)));
+        return new Size(Math.Max(1, Math.Floor(natural.Width * scale)),
+            Math.Max(1, Math.Floor(natural.Height * scale)));
     }
 
     private static Run Draw(MarkdownRun run, NoteLine line)

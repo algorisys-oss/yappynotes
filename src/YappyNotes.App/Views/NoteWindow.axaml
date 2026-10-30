@@ -131,6 +131,7 @@
             <Separator />
             <MenuItem Header="Keep on top" Command="{Binding TogglePinCommand}" />
             <MenuItem Header="Add a to-do" Command="{Binding StartTodoListCommand}" />
+            <MenuItem Header="Add image…" Click="OnAddImageClicked" />
             <MenuItem Header="Clear completed to-dos" Command="{Binding ClearCompletedCommand}" IsVisible="{Binding HasCompletedTodos}" />
             <MenuItem Header="Add a timer" Command="{Binding AddTimerCommand}" IsVisible="{Binding !HasTimer}" />
             <MenuItem Header="Remove the timer" Command="{Binding RemoveTimerCommand}" IsVisible="{Binding HasTimer}" />
@@ -519,6 +520,14 @@
                 </DataTemplate>
             </ItemsControl.ItemTemplate>
         </ItemsControl>
+
+        <TextBlock Grid.Row="3"
+                   x:Name="PasteFailure"
+                   IsVisible="False"
+                   Margin="8,0,22,4"
+                   FontSize="11"
+                   Foreground="#8B3030"
+                   Text="Could not paste image" />
 
         <!-- WindowDecorations="None" means the OS draws no frame and therefore
              no resize handles either. This corner is the only way to resize a

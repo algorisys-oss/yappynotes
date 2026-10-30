@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Markup.Xaml;
 using YappyNotes.Core;
 using YappyNotes.ViewModels;
@@ -15,6 +16,12 @@ namespace YappyNotes.App.Views;
 public partial class NoteWindow : Window
 {
     private NoteViewModel? _note;
+    private NoteImageSession? _imageSession;
+    private (bool WasEditing, int Start, int End) _imageMenuSelection;
+    private bool _imageMenuCaptured;
+    private bool _pasteInProgress;
+
+    internal PastedImageStore? ImageStore { get; set; }
 
     /// <summary>
     /// True while the window is applying the view-model's geometry to itself.
@@ -29,6 +36,30 @@ public partial class NoteWindow : Window
     public NoteWindow()
     {
         AvaloniaXamlLoader.Load(this);
+
+        var chrome = this.FindControl<Border>("NoteChrome");
+        chrome?.AddHandler(PointerPressedEvent, (_, e) =>
+        {
+            if (!e.GetCurrentPoint(chrome).Properties.IsRightButtonPressed)
+            {
+                return;
+            }
+
+            CaptureImageMenuSelection();
+            _imageMenuCaptured = true;
+        }, Avalonia.Interactivity.RoutingStrategies.Tunnel);
+        if (chrome?.ContextMenu is { } menu)
+        {
+            menu.Opening += (_, _) =>
+            {
+                if (!_imageMenuCaptured)
+                {
+                    CaptureImageMenuSelection();
+                }
+
+                _imageMenuCaptured = false;
+            };
+        }
 
         var header = this.FindControl<Grid>("Header");
         if (header is not null)
@@ -49,7 +80,8 @@ public partial class NoteWindow : Window
         }
 
         // Presses on the paper around the text: a line would have handled its own.
-        this.FindControl<ScrollViewer>("FormattedScroll")?.AddHandler(
+        var formattedScroll = this.FindControl<ScrollViewer>("FormattedScroll");
+        formattedScroll?.AddHandler(
             PointerPressedEvent,
             (_, e) =>
             {
@@ -59,6 +91,32 @@ public partial class NoteWindow : Window
                     _note?.BeginEditingAtEnd();
                 }
             });
+        if (formattedScroll is not null)
+        {
+            formattedScroll.PropertyChanged += (_, change) =>
+            {
+                if (change.Property == BoundsProperty || change.Property == ScrollViewer.ViewportProperty)
+                {
+                    RefreshImages();
+                }
+            };
+        }
+
+        Closed += (_, _) =>
+        {
+            if (_imageSession is not null)
+            {
+                _imageSession.Changed -= OnImagesChanged;
+            }
+
+            if (formatted is not null)
+            {
+                formatted.Images = null;
+            }
+
+            _imageSession?.Dispose();
+            _imageSession = null;
+        };
 
         var body = this.FindControl<TextBox>("Body");
         if (body is not null)
@@ -114,6 +172,25 @@ public partial class NoteWindow : Window
         }
 
         _note = note;
+        var formatted = this.FindControl<FormattedNote>("Formatted");
+        if (_imageSession is not null)
+        {
+            _imageSession.Changed -= OnImagesChanged;
+        }
+
+        if (formatted is not null)
+        {
+            formatted.Images = null;
+        }
+
+        _imageSession?.Dispose();
+        _imageSession = new NoteImageSession(new LocalImageLoader());
+        _imageSession.Changed += OnImagesChanged;
+        if (formatted is not null)
+        {
+            formatted.Images = _imageSession;
+        }
+
         DataContext = note;
         note.PropertyChanged += OnNoteChanged;
 
@@ -130,6 +207,29 @@ public partial class NoteWindow : Window
         {
             _applyingGeometry = false;
         }
+
+        RefreshImages();
+    }
+
+    internal NoteImageSession? ImageSession => _imageSession;
+
+    private void OnImagesChanged(object? sender, EventArgs e)
+        => this.FindControl<FormattedNote>("Formatted")?.RefreshImages();
+
+    private void RefreshImages()
+    {
+        var scroll = this.FindControl<ScrollViewer>("FormattedScroll");
+        if (_note is null || _imageSession is null || scroll is null
+            || scroll.Bounds.Width <= 0 || scroll.Bounds.Height <= 0)
+        {
+            return;
+        }
+
+        var viewport = new Size(
+            Math.Max(1, scroll.Viewport.Width > 0 ? scroll.Viewport.Width : scroll.Bounds.Width - 16),
+            Math.Max(1, scroll.Viewport.Height > 0 ? scroll.Viewport.Height : scroll.Bounds.Height - 16));
+        this.FindControl<FormattedNote>("Formatted")!.ImageViewport = viewport;
+        _imageSession.Update(_note.Lines, viewport);
     }
 
     /// <summary>
@@ -143,6 +243,16 @@ public partial class NoteWindow : Window
 
         if (e.Handled)
         {
+            return;
+        }
+
+        if (e.Key == Key.V && e.KeyModifiers == KeyModifiers.Control && ImageStore is not null
+            && _note is not null && !(_note.ShowsEditor && this.FindControl<TextBox>("Body")?.IsFocused == true)
+            && this.FindControl<TextBox>("TitleBox")?.IsFocused != true
+            && this.FindControl<TextBox>("TodoAdder")?.IsFocused != true)
+        {
+            e.Handled = true;
+            _ = PasteFromClipboardAsync(null);
             return;
         }
 
@@ -187,6 +297,14 @@ public partial class NoteWindow : Window
     /// </summary>
     private void OnBodyKeyDown(object? sender, KeyEventArgs e)
     {
+        if (e.Key == Key.V && e.KeyModifiers == KeyModifiers.Control
+            && sender is TextBox pasteTarget && ImageStore is not null)
+        {
+            e.Handled = true;
+            _ = PasteFromClipboardAsync(pasteTarget);
+            return;
+        }
+
         if (e.Key != Key.Enter || e.KeyModifiers != KeyModifiers.None
             || sender is not TextBox body || _note is null || body.SelectionStart != body.SelectionEnd)
         {
@@ -198,6 +316,109 @@ public partial class NoteWindow : Window
             e.Handled = true;
             body.CaretIndex = caret;
         }
+    }
+
+    private async Task PasteFromClipboardAsync(TextBox? editor)
+    {
+        if (_pasteInProgress || _note is not { } note || ImageStore is not { } store)
+        {
+            return;
+        }
+
+        _pasteInProgress = true;
+        var start = editor?.SelectionStart;
+        var end = editor?.SelectionEnd;
+        var original = note.Content;
+        var failure = this.FindControl<TextBlock>("PasteFailure");
+        if (failure is not null) failure.IsVisible = false;
+
+        try
+        {
+            using var bitmap = await Clipboard!.TryGetBitmapAsync();
+            if (bitmap is null)
+            {
+                if (editor is not null && _note == note) editor.Paste();
+                return;
+            }
+
+            var uri = await store.SaveAsync(bitmap);
+            if (_note != note || note.Content != original)
+            {
+                return;
+            }
+
+            var edit = note.PasteSavedImage(uri, start, end);
+            if (editor is not null && edit is not null)
+            {
+                note.BeginEditingAt(edit.SelectionStart);
+                Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                {
+                    if (_note != note) return;
+                    editor.Focus();
+                    editor.CaretIndex = edit.SelectionEnd;
+                    editor.SelectionStart = edit.SelectionStart;
+                    editor.SelectionEnd = edit.SelectionEnd;
+                });
+            }
+        }
+        catch (Exception)
+        {
+            if (failure is not null)
+            {
+                failure.Text = "Could not paste image";
+                failure.IsVisible = true;
+            }
+        }
+        finally
+        {
+            _pasteInProgress = false;
+        }
+    }
+
+    private async void OnAddImageClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (_note is not { } note)
+        {
+            return;
+        }
+
+        var (wasEditing, start, end) = _imageMenuSelection;
+        MarkdownEdit? edit = null;
+        try
+        {
+            edit = await note.AddImageAsync(wasEditing ? start : null, wasEditing ? end : null);
+        }
+        catch (Exception)
+        {
+            // Picker failure leaves the content and selection as they were.
+        }
+
+        if (!wasEditing || _note != note)
+        {
+            return;
+        }
+
+        var caret = edit?.SelectionStart ?? start;
+        note.BeginEditingAt(caret);
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            var body = this.FindControl<TextBox>("Body");
+            if (body is null || _note != note)
+            {
+                return;
+            }
+
+            body.Focus();
+            body.CaretIndex = edit?.SelectionEnd ?? end;
+            body.SelectionStart = edit?.SelectionStart ?? start;
+            body.SelectionEnd = edit?.SelectionEnd ?? end;
+        });
+    }
+
+    private void CaptureImageMenuSelection()
+    {
+        var body = this.FindControl<TextBox>("Body");
+        _imageMenuSelection = (_note?.IsEditing == true, body?.SelectionStart ?? 0, body?.SelectionEnd ?? 0);
     }
 
     /// <summary>
@@ -254,6 +475,7 @@ public partial class NoteWindow : Window
     protected override void OnOpened(EventArgs e)
     {
         base.OnOpened(e);
+        RefreshImages();
 
         // A new note should be ready to type into without a click.
         this.FindControl<TextBox>("Body")?.Focus();
@@ -307,6 +529,11 @@ public partial class NoteWindow : Window
     /// </summary>
     private void OnNoteChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
+        if (e.PropertyName == nameof(NoteViewModel.Lines))
+        {
+            RefreshImages();
+        }
+
         if (e.PropertyName == nameof(NoteViewModel.IsAddingTodo) && _note is { IsAddingTodo: true })
         {
             // The new line has only just become visible, and a hidden control cannot
@@ -422,30 +649,6 @@ public partial class NoteWindow : Window
 
     private void BeginEditingTitle()
     {
-        var formatted = this.FindControl<FormattedNote>("Formatted");
-        if (formatted is not null)
-        {
-            formatted.LinePressed += (_, e) => _ = _note?.PressAsync(e.Line, e.DrawnIndex, e.Trailing);
-        }
-
-        // Presses on the paper around the text: a line would have handled its own.
-        this.FindControl<ScrollViewer>("FormattedScroll")?.AddHandler(
-            PointerPressedEvent,
-            (_, e) =>
-            {
-                if (e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
-                {
-                    e.Handled = true;
-                    _note?.BeginEditingAtEnd();
-                }
-            });
-
-        var body = this.FindControl<TextBox>("Body");
-        if (body is not null)
-        {
-            body.LostFocus += OnBodyLostFocus;
-        }
-
         var titleBox = this.FindControl<TextBox>("TitleBox");
         if (titleBox is null)
         {

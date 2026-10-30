@@ -66,4 +66,24 @@ public class TodoProgressTests
     {
         Assert.Equal("- [ ] milk\n- [ ] bread", TodoList.ClearCompleted("- [ ] milk\n- [ ] bread"));
     }
+
+    [Fact]
+    public void TodoList_WithImageBetweenTasks_PreservesReference()
+    {
+        const string image = "![café](file:///tmp/caf%C3%A9%20da%20manh%C3%A3.webp)";
+        var content = $"- [x] bread\n{image}\n- [ ] milk";
+        var milk = Assert.Single(NoteMarkdown.Parse(content), block => block.Kind == MarkdownBlockKind.Task && !block.IsDone);
+
+        var ticked = NoteMarkdown.ToggleTask(content, milk.CheckMarkIndex);
+        Assert.Equal($"- [x] bread\n{image}\n- [x] milk", ticked);
+
+        var cleared = TodoList.ClearCompleted(content);
+        Assert.Equal($"{image}\n- [ ] milk", cleared);
+
+        var added = TodoList.Add(content, "tea");
+        Assert.Equal($"- [x] bread\n{image}\n- [ ] milk\n- [ ] tea", added);
+
+        Assert.All([ticked, cleared, added], value =>
+            Assert.Single(NoteMarkdown.Parse(value), block => block.Kind == MarkdownBlockKind.Image && block.ImageUri is not null));
+    }
 }

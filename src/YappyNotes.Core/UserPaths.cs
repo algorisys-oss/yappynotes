@@ -1,7 +1,7 @@
 namespace YappyNotes.Core;
 
 /// <summary>
-/// Where YappyNotes keeps the one file it owns.
+/// Where YappyNotes keeps its database and managed images.
 /// </summary>
 /// <remarks>
 /// The three platforms disagree about where user data goes, so nothing anywhere
@@ -42,14 +42,18 @@ public sealed class UserPaths
 
         DataDirectory = dataDirectory;
         DatabaseFile = Path.Combine(dataDirectory, DatabaseFileName);
+        ImageDirectory = Path.Combine(dataDirectory, "images");
         _wasChosenByHand = chosenByHand;
     }
 
     /// <summary>The folder holding the database.</summary>
     public string DataDirectory { get; }
 
-    /// <summary>The database itself. This file is the whole application state.</summary>
+    /// <summary>The database containing notes and settings.</summary>
     public string DatabaseFile { get; }
+
+    /// <summary>PNG files created from images pasted into notes.</summary>
+    public string ImageDirectory { get; }
 
     /// <summary>
     /// The paths this machine should use: the override if it is set, the

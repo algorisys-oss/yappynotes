@@ -2,9 +2,9 @@
 
 Desktop sticky notes for Ubuntu, Windows and macOS. Each note is its own window
 that stays where you put it, saves itself as you type, and is still there after a
-reboot. No account and no sync — everything lives in one SQLite file, and the only
-thing it ever asks the network is whether a newer release exists (which you can
-turn off).
+reboot. No account and no sync — note text and settings live in a local SQLite
+file; images pasted into notes live beside it. The only thing the app asks the
+network is whether a newer release exists (which you can turn off).
 
 Built with C# / .NET 10 and [Avalonia UI](https://avaloniaui.net), MVVM, and a
 repository over SQLite.
@@ -59,7 +59,38 @@ closed, and the repository contract answered twice.
 > is turned off, and starting it while it runs brings the running copy forward
 > rather than opening a second.
 >
-> 681 green tests. Start at [LOOP.md](LOOP.md).
+> Start at [LOOP.md](LOOP.md) to run the tests.
+
+## Images in notes (proposed feature)
+
+Put a local image reference on its own line, for example
+`![diagram](file:///home/you/Pictures/diagram.png)`. The formatted note shows a
+thumbnail among its text; click the image or a missing-image message to edit the
+Markdown reference. The editor shows the reference as text. In the note's context
+menu, **Add image…** chooses a file and inserts the reference at the cursor or in
+place of a selection. The chosen file stays where it is; the app does not copy it.
+
+**Ctrl+V** with a screenshot or other bitmap on the clipboard saves a PNG in the
+app's `images/` directory and inserts its reference. In the editor it replaces
+the selection; in the formatted note it appends the image. If the clipboard has
+both an image and text, the image wins. Ctrl+V with text alone still pastes text
+normally in the editor. If the image cannot be saved, the note remains unchanged
+and shows a short error message.
+
+Local PNG, JPEG, GIF and WebP files are supported. GIFs display a static frame.
+Remote images, SVG and BMP are not supported. A source file may be at most
+32 MiB, 20,000 pixels on either side and 100 million pixels in total. A pasted
+PNG must fit the same limits. The thumbnail preserves the image's proportions,
+fits the note's available space, and can grow as the note grows, up to the
+image's natural size and a 4,096-pixel display limit.
+
+The database stores the Markdown URI, not image bytes. After reopening a note,
+a moved or deleted referenced file shows an editable missing-image message. The
+app does not delete a managed PNG when its reference is removed or its note is
+archived. A complete backup includes `notes.db`, the adjacent `images/`
+directory, and any external image files referenced by notes. The references
+use absolute local paths. Restoring files at different paths requires updating
+the references in the notes.
 
 ## Documentation
 
@@ -267,14 +298,14 @@ older installed copy at the folder with `YAPPYNOTES_UPDATE_SOURCE` — see
 Resolved by `UserPaths` in `YappyNotes.Core`, following each platform's
 convention rather than dropping a dotfile in `$HOME`:
 
-| | Database and settings |
-| --- | --- |
-| Linux | `~/.local/share/YappyNotes/notes.db` (or `$XDG_DATA_HOME/YappyNotes/`) |
-| Windows | `%APPDATA%\YappyNotes\notes.db` |
-| macOS | `~/Library/Application Support/YappyNotes/notes.db` |
+| | Database and settings | Pasted images |
+| --- | --- | --- |
+| Linux | `~/.local/share/YappyNotes/notes.db` (or `$XDG_DATA_HOME/YappyNotes/`) | Same directory, `images/` |
+| Windows | `%APPDATA%\YappyNotes\notes.db` | Same directory, `images/` |
+| macOS | `~/Library/Application Support/YappyNotes/notes.db` | Same directory, `images/` |
 
-That file is the entire application state. Copy it to back up your notes; delete
-it to start over.
+`YAPPYNOTES_DATA_DIR` overrides the directory for both the database and pasted
+images. See the backup instructions above before moving or deleting either.
 
 ### Notes from before the rename
 

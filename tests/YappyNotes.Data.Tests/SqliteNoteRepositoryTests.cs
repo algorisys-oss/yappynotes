@@ -29,6 +29,36 @@ public sealed class SqliteNoteRepositoryTests : NoteRepositoryContract, IDisposa
         return new SqliteNoteRepository(database);
     }
 
+    [Fact]
+    public async Task SqliteNoteRepository_ImageReference_RoundTripsAsText()
+    {
+        Directory.CreateDirectory(_directory);
+        var database = new NoteDatabase(Path.Combine(_directory, $"{Guid.CreateVersion7()}.db"));
+        var token = TestContext.Current.CancellationToken;
+        await new Migrator().MigrateAsync(database, token);
+        var repository = new SqliteNoteRepository(database);
+        const string reference = "![café \\] plano](file:///tmp/caf%C3%A9%20%5Bplano%5D.webp)";
+        var note = Note.Create(TimeProvider.System);
+        note.Content = $"before\n{reference}\nafter";
+
+        await repository.InsertAsync(note, token);
+        var restored = await repository.GetByIdAsync(note.Id, token);
+
+        Assert.NotNull(restored);
+        Assert.Equal(note.Content, restored.Content);
+        Assert.Equal(reference, restored.Content.Split('\n')[1]);
+        Assert.Equal(MarkdownBlockKind.Image, NoteMarkdown.Parse(restored.Content)[1].Kind);
+
+        await using var connection = await database.OpenAsync(token);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "select typeof(Content), Content from notes where Id = @id;";
+        command.Parameters.AddWithValue("@id", note.Id.ToString());
+        await using var reader = await command.ExecuteReaderAsync(token);
+        Assert.True(await reader.ReadAsync(token));
+        Assert.Equal("text", reader.GetString(0));
+        Assert.Equal(note.Content, reader.GetString(1));
+    }
+
     public void Dispose()
     {
         // The pool keeps the file open, and on Windows that makes the delete fail.

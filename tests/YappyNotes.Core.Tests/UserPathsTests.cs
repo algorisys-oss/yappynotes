@@ -48,6 +48,21 @@ public class UserPathsTests
     }
 
     [Fact]
+    public void UserPaths_ImageDirectory_IsInsideTheSelectedDataDirectory()
+    {
+        var normal = UserPaths.Resolve(Nothing);
+        var overridden = UserPaths.Resolve(Environment((UserPaths.DirectoryOverrideVariable,
+            Path.Combine(Path.GetTempPath(), "my notes"))));
+        var sandbox = new UserPaths(Path.Combine(Path.GetTempPath(), "sandbox notes"));
+
+        foreach (var paths in new[] { normal, overridden, sandbox })
+        {
+            Assert.Equal(Path.Combine(paths.DataDirectory, "images"), paths.ImageDirectory);
+            Assert.Equal(Path.GetFullPath(paths.ImageDirectory), paths.ImageDirectory);
+        }
+    }
+
+    [Fact]
     public void UserPaths_GivenABlankDirectory_Throws()
     {
         Assert.ThrowsAny<ArgumentException>(() => new UserPaths("  "));

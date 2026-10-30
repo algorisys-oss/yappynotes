@@ -63,7 +63,8 @@ public partial class App : Application
         _windows = new WindowManager(
             _services.Notes,
             _services.AutoSave,
-            () => new SettingsViewModel(_services!.Settings, new ThemeApplier(), loginItem));
+            () => new SettingsViewModel(_services!.Settings, new ThemeApplier(), loginItem),
+            _services.Paths);
 
         var settings = await _services.Settings.LoadAsync();
         new ThemeApplier().Apply(settings.Theme);

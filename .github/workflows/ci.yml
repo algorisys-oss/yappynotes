@@ -2,14 +2,14 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'feature/**']
   pull_request:
 
 jobs:
   build:
-    # Ubuntu only. The whole suite is headless - the UI tests use
-    # Avalonia.Headless and never open a window - so nothing here needs a
-    # display, and a green run means the same as a green run on a desk.
+    if: github.event_name != 'push' || github.ref == 'refs/heads/main'
+    # The full suite stays on Ubuntu. UI tests use Avalonia.Headless and do not
+    # need a display; the image codec smoke below also runs on Windows and macOS.
     runs-on: ubuntu-latest
 
     steps:
@@ -35,6 +35,25 @@ jobs:
 
       - name: Check formatting
         run: dotnet format yappynotes.sln --verify-no-changes --no-restore
+
+  image-codecs:
+    # Cross-publishing does not load platform codecs. Decode real fixtures on
+    # each OS with the Skia renderer used by the desktop app.
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Decode image fixtures
+        run: dotnet test tests/YappyNotes.App.Tests/YappyNotes.App.Tests.csproj --configuration Release --filter 'FullyQualifiedName~ImageCodecSmokeTests' --verbosity normal
 
   package:
     # Proves the thing a reader would actually download still builds, on every

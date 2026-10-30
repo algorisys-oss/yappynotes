@@ -41,6 +41,122 @@ public class NoteMarkdownBlockTests
     }
 
     [Fact]
+    public void Parse_StandaloneLocalImage_ProducesImageBlock()
+    {
+        const string reference = "![diagrama](file:///home/andre/diagram.png)";
+        var content = $"antes\n{reference}\ndepois";
+
+        var blocks = NoteMarkdown.Parse(content);
+
+        Assert.Equal(3, blocks.Count);
+        Assert.Equal(MarkdownBlockKind.Paragraph, blocks[0].Kind);
+        Assert.Equal("antes", TextOf(blocks[0]));
+        Assert.Equal(MarkdownBlockKind.Image, blocks[1].Kind);
+        Assert.Equal("diagrama", blocks[1].ImageDescription);
+        Assert.Equal(new Uri("file:///home/andre/diagram.png"), blocks[1].ImageUri);
+        Assert.Equal(content.IndexOf(reference, StringComparison.Ordinal), blocks[1].SourceStart);
+        Assert.Equal(reference.Length, blocks[1].SourceLength);
+        Assert.Equal(MarkdownBlockKind.Paragraph, blocks[2].Kind);
+        Assert.Equal("depois", TextOf(blocks[2]));
+    }
+
+    [Fact]
+    public void Parse_ImageSyntaxInsideInlineCode_RemainsLiteralText()
+    {
+        var block = Single("`![diagrama](file:///tmp/diagram.png)`");
+
+        Assert.Equal(MarkdownBlockKind.Paragraph, block.Kind);
+        var code = Assert.Single(block.Runs);
+        Assert.Equal("![diagrama](file:///tmp/diagram.png)", code.Text);
+        Assert.Equal(RunStyle.Code, code.Style);
+    }
+
+    [Theory]
+    [InlineData("antes ![diagrama](file:///tmp/diagram.png)")]
+    [InlineData("![diagrama](file:///tmp/diagram.png) depois")]
+    [InlineData(" ![diagrama](file:///tmp/diagram.png)")]
+    [InlineData("![diagrama](file:///tmp/diagram.png) ")]
+    public void Parse_ImageMixedWithText_RemainsLiteralText(string line)
+    {
+        var block = Single(line);
+
+        Assert.Equal(MarkdownBlockKind.Paragraph, block.Kind);
+        Assert.Equal(line, TextOf(block));
+        Assert.All(block.Runs, run => Assert.Null(run.Link));
+    }
+
+    [Theory]
+    [InlineData("![diagrama](https://example.com/diagram.png)")]
+    [InlineData("![diagrama](data:image/png;base64,AAAA)")]
+    [InlineData("![diagrama](diagram.png)")]
+    [InlineData("![diagrama](file://server/share/diagram.png)")]
+    [InlineData("![diagrama](file:////server/share/diagram.png)")]
+    [InlineData("![diagrama](file:///tmp/diagram.bmp)")]
+    public void Parse_UnsupportedImageAddress_RemainsLiteralText(string line)
+    {
+        var block = Single(line);
+
+        Assert.Equal(MarkdownBlockKind.Paragraph, block.Kind);
+        Assert.Equal(line, TextOf(block));
+        Assert.All(block.Runs, run => Assert.Null(run.Link));
+    }
+
+    [Fact]
+    public void Parse_LocalImagePathWithEncodedSpacesAndUnicode_KeepsSourceOffsets()
+    {
+        const string reference = "![café](file:///tmp/caf%C3%A9%20da%20manh%C3%A3.webp)";
+        var content = $"📷 antes\r\n{reference}\r\ndepois";
+
+        var image = NoteMarkdown.Parse(content)[1];
+
+        Assert.Equal(MarkdownBlockKind.Image, image.Kind);
+        Assert.Equal("café", image.ImageDescription);
+        Assert.Equal(new Uri("file:///tmp/caf%C3%A9%20da%20manh%C3%A3.webp"), image.ImageUri);
+        Assert.Equal(content.IndexOf(reference, StringComparison.Ordinal), image.SourceStart);
+        Assert.Equal(reference.Length, image.SourceLength);
+        Assert.Equal(reference, content.Substring(image.SourceStart, image.SourceLength));
+    }
+
+    [Fact]
+    public void Parse_WindowsDriveImageUri_KeepsSourceOffsetsOnEveryPlatform()
+    {
+        const string reference = "![captura](file:///C:/Minhas%20Imagens/captura.jpg)";
+        var content = $"antes\n{reference}\ndepois";
+
+        var image = NoteMarkdown.Parse(content)[1];
+
+        Assert.Equal(MarkdownBlockKind.Image, image.Kind);
+        Assert.Equal(new Uri("file:///C:/Minhas%20Imagens/captura.jpg"), image.ImageUri);
+        Assert.Equal(content.IndexOf(reference, StringComparison.Ordinal), image.SourceStart);
+        Assert.Equal(reference.Length, image.SourceLength);
+    }
+
+    [Theory]
+    [InlineData("![diagrama](file:///tmp/diagram.png")]
+    [InlineData("![diagrama](file:///tmp/diagram.png))")]
+    [InlineData("![diagrama](file:///tmp/diagram(1).png)")]
+    [InlineData("![diagrama\\](file:///tmp/diagram.png)")]
+    public void Parse_MalformedImageSyntax_RemainsLiteralText(string line)
+    {
+        var block = Single(line);
+
+        Assert.Equal(MarkdownBlockKind.Paragraph, block.Kind);
+        Assert.Equal(line, TextOf(block));
+    }
+
+    [Theory]
+    [InlineData("![plano \\] final](file:///tmp/diagram.png)", "plano ] final")]
+    [InlineData("![cópia \\\\ final](file:///tmp/diagram.png)", "cópia \\ final")]
+    public void Parse_EscapedImageDescription_ProducesUnescapedDescription(string line, string description)
+    {
+        var image = Single(line);
+
+        Assert.Equal(MarkdownBlockKind.Image, image.Kind);
+        Assert.Equal(description, image.ImageDescription);
+        Assert.Equal(line, line.Substring(image.SourceStart, image.SourceLength));
+    }
+
+    [Fact]
     public void Parse_AnEmptyLineBetweenTwo_IsKeptAsABlankBlock()
     {
         var blocks = NoteMarkdown.Parse("milk\n\nbread");

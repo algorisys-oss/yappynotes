@@ -125,6 +125,29 @@ public class ManagerViewModelTests
     }
 
     [Fact]
+    public async Task RefreshAsync_WithAnImageReference_ShowsACompactPreviewWithoutItsUri()
+    {
+        await NoteAsync("Teste", "Teste\n![diagrama](file:///home/andre/Imagens/diagrama.jpeg)");
+        var manager = NewManager();
+
+        await manager.RefreshAsync(Token);
+
+        Assert.Equal("Teste [image]", manager.Items[0].Preview);
+    }
+
+    [Fact]
+    public async Task RefreshAsync_WithAnUntitledImageOnly_UsesACompactTitle()
+    {
+        await NoteAsync(string.Empty, "![diagrama](file:///home/andre/Imagens/diagrama.jpeg)");
+        var manager = NewManager();
+
+        await manager.RefreshAsync(Token);
+
+        Assert.Equal("[image]", manager.Items[0].DisplayTitle);
+        Assert.Equal("[image]", manager.Items[0].Preview);
+    }
+
+    [Fact]
     public async Task SearchCommand_WithText_KeepsOnlyMatchingNotes()
     {
         await NoteAsync("Shopping", "milk");

@@ -18,6 +18,7 @@ public sealed class WindowManager : IWindowManager
     private readonly NoteService _notes;
     private readonly AutoSaveService _autoSave;
     private readonly Func<SettingsViewModel>? _newSettings;
+    private readonly PastedImageStore? _pastedImages;
     private SettingsWindow? _settingsWindow;
     private readonly Dictionary<Guid, NoteWindow> _open = [];
     private readonly Dictionary<Guid, NoteViewModel> _viewModels = [];
@@ -28,7 +29,8 @@ public sealed class WindowManager : IWindowManager
     /// actually opens the window - and optional, because the tests that are
     /// about note windows have no business standing up a settings store.
     /// </param>
-    public WindowManager(NoteService notes, AutoSaveService autoSave, Func<SettingsViewModel>? newSettings = null)
+    public WindowManager(NoteService notes, AutoSaveService autoSave, Func<SettingsViewModel>? newSettings = null,
+        UserPaths? paths = null)
     {
         ArgumentNullException.ThrowIfNull(notes);
         ArgumentNullException.ThrowIfNull(autoSave);
@@ -36,6 +38,7 @@ public sealed class WindowManager : IWindowManager
         _notes = notes;
         _autoSave = autoSave;
         _newSettings = newSettings;
+        _pastedImages = paths is null ? null : new PastedImageStore(paths);
     }
 
     public IReadOnlyCollection<Guid> OpenNotes => _open.Keys;
@@ -62,6 +65,7 @@ public sealed class WindowManager : IWindowManager
         }
 
         var window = new NoteWindow(viewModel);
+        window.ImageStore = _pastedImages;
         _open[noteId] = window;
 
         // However it closed - its own button, or the archive command - the
@@ -173,7 +177,8 @@ public sealed class WindowManager : IWindowManager
             note, _notes, _autoSave, this,
             TimeProvider.System,
             new AvaloniaUiDispatcher(),
-            new AvaloniaLinkLauncher(() => _open.GetValueOrDefault(note.Id)));
+            new AvaloniaLinkLauncher(() => _open.GetValueOrDefault(note.Id)),
+            new AvaloniaImageFilePicker(() => _open.GetValueOrDefault(note.Id)));
         _viewModels[noteId] = viewModel;
         return viewModel;
     }

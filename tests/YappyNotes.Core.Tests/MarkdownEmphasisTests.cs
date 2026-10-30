@@ -150,6 +150,43 @@ public class MarkdownEmphasisTests
         Assert.Equal("**milk**\n\n**bread**", edit.Content);
     }
 
+    [Theory]
+    [InlineData(Emphasis.Bold, "**before**", "**after**")]
+    [InlineData(Emphasis.Italic, "*before*", "*after*")]
+    public void ToggleEmphasis_SelectionAcrossImage_LeavesReferenceUntouched(
+        Emphasis emphasis, string expectedBefore, string expectedAfter)
+    {
+        const string image = "![café](file:///tmp/caf%C3%A9%20plan.png)";
+        var content = $"before\n{image}\nafter";
+
+        var edit = MarkdownEmphasis.Toggle(content, 0, content.Length, emphasis);
+
+        Assert.Equal($"{expectedBefore}\n{image}\n{expectedAfter}", edit.Content);
+        Assert.Equal(MarkdownBlockKind.Image, NoteMarkdown.Parse(edit.Content)[1].Kind);
+    }
+
+    [Fact]
+    public void ToggleEmphasis_SelectionOnlyOnImage_LeavesReferenceUntouched()
+    {
+        const string content = "![diagram](file:///tmp/diagram.png)";
+
+        var edit = MarkdownEmphasis.Toggle(content, 0, content.Length, Emphasis.Bold);
+
+        Assert.Equal(content, edit.Content);
+        Assert.Equal((0, content.Length), (edit.SelectionStart, edit.SelectionEnd));
+    }
+
+    [Fact]
+    public void ToggleEmphasis_CaretInsideImage_LeavesReferenceUntouched()
+    {
+        const string content = "![diagram](file:///tmp/diagram.png)";
+
+        var edit = MarkdownEmphasis.Toggle(content, 5, 5, Emphasis.Italic);
+
+        Assert.Equal(content, edit.Content);
+        Assert.Equal((5, 5), (edit.SelectionStart, edit.SelectionEnd));
+    }
+
     [Fact]
     public void Toggle_WithTheSelectionMadeBackwards_WorksTheSame()
     {

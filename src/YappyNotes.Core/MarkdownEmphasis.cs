@@ -44,7 +44,10 @@ public static class MarkdownEmphasis
         // A caret with nothing selected gets an empty pair to type into - or, sitting
         // inside one, has it taken away.
         List<Segment> segments = start == end
-            ? [new Segment(start, end, LineBounds(content, start))]
+            ? NoteMarkdown.Parse(content).Any(block => block.Kind == MarkdownBlockKind.Image
+                && start >= block.SourceStart && start <= block.SourceStart + block.SourceLength)
+                ? []
+                : [new Segment(start, end, LineBounds(content, start))]
             : SegmentsOf(content, start, end);
 
         if (segments.Count == 0)
@@ -119,6 +122,11 @@ public static class MarkdownEmphasis
 
         foreach (var block in NoteMarkdown.Parse(content))
         {
+            if (block.Kind == MarkdownBlockKind.Image)
+            {
+                continue;
+            }
+
             var lineEnd = block.SourceStart + block.SourceLength;
             var s = Math.Max(start, block.TextStart);
             var e = Math.Min(end, lineEnd);
