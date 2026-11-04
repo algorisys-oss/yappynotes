@@ -207,6 +207,15 @@ public static class NoteMarkdown
         {
             var c = content[i];
 
+            if (c == '\\' && i + 1 < end && content[i + 1] is '[' or ']' or '\\')
+            {
+                Plain(content, plainStart, i, style, runs);
+                runs.Add(new MarkdownRun(content.Substring(i + 1, 1), i + 1, style));
+                i += 2;
+                plainStart = i;
+                continue;
+            }
+
             if (addresses.TryGetValue(i, out var address))
             {
                 Plain(content, plainStart, i, style, runs);
@@ -315,7 +324,11 @@ public static class NoteMarkdown
     {
         uri = null;
         linkEnd = -1;
-        labelEnd = content.IndexOf(']', open + 1, end - open - 1);
+        labelEnd = open + 1;
+        while (labelEnd < end && (content[labelEnd] != ']' || content[labelEnd - 1] == '\\'))
+        {
+            labelEnd++;
+        }
 
         if (labelEnd <= open + 1 || labelEnd + 1 >= end || content[labelEnd + 1] != '(')
         {

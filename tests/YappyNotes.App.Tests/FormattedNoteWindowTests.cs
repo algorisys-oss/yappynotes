@@ -5,6 +5,7 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input;
+using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Threading;
 using Microsoft.Extensions.Time.Testing;
@@ -122,6 +123,35 @@ public class FormattedNoteWindowTests
     }
 
     [AvaloniaFact]
+    public void ModeButtons_AfterSwitchingToPreview_KeepPreviewSelected()
+    {
+        var window = OpenWith("milk");
+        var edit = window.FindControl<ToggleButton>("EditModeButton")!;
+        var preview = window.FindControl<ToggleButton>("PreviewModeButton")!;
+        Click(window, edit);
+        Assert.True(edit.IsChecked);
+        Assert.False(preview.IsChecked);
+
+        Click(window, preview);
+
+        Assert.False(edit.IsChecked);
+        Assert.True(preview.IsChecked);
+    }
+
+    [AvaloniaFact]
+    public void ModeButtons_WhenPreviewIsAlreadyActive_KeepItSelectedAfterAnotherClick()
+    {
+        var window = OpenWith("milk");
+        var preview = window.FindControl<ToggleButton>("PreviewModeButton")!;
+        Assert.True(preview.IsChecked);
+
+        Click(window, preview);
+
+        Assert.True(preview.IsChecked);
+        Assert.False(NoteOf(window).ShowsEditor);
+    }
+
+    [AvaloniaFact]
     public void ModeButtons_AfterEditing_KeepTheLastCaretWhenReturning()
     {
         var window = OpenWith("buy milk");
@@ -156,7 +186,7 @@ public class FormattedNoteWindowTests
         window.Height = 140;
         Dispatcher.UIThread.RunJobs();
         var header = window.FindControl<Grid>("Header")!;
-        var bar = window.FindControl<StackPanel>("ModeBar")!;
+        var bar = window.FindControl<Grid>("ModeBar")!;
         var preview = window.FindControl<ScrollViewer>("FormattedScroll")!;
         var headerBottom = header.TranslatePoint(new Point(0, header.Bounds.Height), window)!.Value.Y;
         var barTop = bar.TranslatePoint(new Point(0, 0), window)!.Value.Y;
@@ -174,6 +204,7 @@ public class FormattedNoteWindowTests
         Click(window, window.FindControl<ToggleButton>("EditModeButton")!);
         Click(window, window.FindControl<ToggleButton>("PreviewModeButton")!);
 
+        Assert.False(NoteOf(window).IsEditing, "Preview did not end editing");
         window.KeyPress(Key.Enter, RawInputModifiers.None, PhysicalKey.Enter, null);
         Dispatcher.UIThread.RunJobs();
 
@@ -245,6 +276,529 @@ public class FormattedNoteWindowTests
         Dispatcher.UIThread.RunJobs();
 
         Assert.True(ShowsFormatted(window));
+    }
+
+    [AvaloniaFact]
+    public void Toolbar_BoldButton_UsesTheSameMarkdownAsCtrlB()
+    {
+        var window = OpenWith("buy milk");
+        Click(window, window.FindControl<ToggleButton>("EditModeButton")!);
+        Assert.True(window.FindControl<Button>("BoldButton")!.IsEffectivelyVisible);
+        var editor = Editor(window);
+        editor.SelectionStart = 4;
+        editor.SelectionEnd = 8;
+
+        Click(window, window.FindControl<Button>("BoldButton")!);
+
+        Assert.Equal("buy **milk**", NoteOf(window).Content);
+        Assert.Equal((6, 10), (editor.SelectionStart, editor.SelectionEnd));
+        Assert.True(editor.IsFocused);
+    }
+
+    [AvaloniaFact]
+    public void NativeUndoRedo_AfterTyping_RestoresBothVersions()
+    {
+        var window = OpenWith("buy milk");
+        Click(window, window.FindControl<ToggleButton>("EditModeButton")!);
+        var editor = Editor(window);
+        editor.CaretIndex = editor.Text!.Length;
+        window.KeyTextInput("!");
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal("buy milk!", NoteOf(window).Content);
+
+        editor.Undo();
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal("buy milk", NoteOf(window).Content);
+        editor.Redo();
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal("buy milk!", NoteOf(window).Content);
+    }
+
+    [AvaloniaFact]
+    public void NativeUndoRedo_AfterTypingAndSelectedTextReplacement_UsesOneHistory()
+    {
+        var window = OpenWith("buy milk");
+        Click(window, window.FindControl<ToggleButton>("EditModeButton")!);
+        var editor = Editor(window);
+        editor.CaretIndex = editor.Text!.Length;
+        window.KeyTextInput("!");
+        Dispatcher.UIThread.RunJobs();
+        editor.SelectionStart = 4;
+        editor.SelectionEnd = 8;
+
+        editor.SelectedText = "**milk**";
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal("buy **milk**!", NoteOf(window).Content);
+
+        editor.Undo();
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal("buy milk!", NoteOf(window).Content);
+
+        editor.Undo();
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal("buy milk", NoteOf(window).Content);
+
+        editor.Redo();
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal("buy milk!", NoteOf(window).Content);
+
+        editor.Redo();
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal("buy **milk**!", NoteOf(window).Content);
+    }
+
+    [AvaloniaFact]
+    public void Toolbar_BoldAfterTyping_UndoesAndRedoesInOrder()
+    {
+        var window = OpenWith("buy milk");
+        Click(window, window.FindControl<ToggleButton>("EditModeButton")!);
+        var editor = Editor(window);
+        editor.CaretIndex = editor.Text!.Length;
+        window.KeyTextInput("!");
+        Dispatcher.UIThread.RunJobs();
+        editor.SelectionStart = 4;
+        editor.SelectionEnd = 8;
+        Click(window, window.FindControl<Button>("BoldButton")!);
+        Assert.Equal("buy **milk**!", NoteOf(window).Content);
+
+        editor.Undo();
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal("buy milk!", NoteOf(window).Content);
+        editor.Undo();
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal("buy milk", NoteOf(window).Content);
+        editor.Redo();
+        Dispatcher.UIThread.RunJobs();
+        editor.Redo();
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal("buy **milk**!", NoteOf(window).Content);
+    }
+
+    [AvaloniaFact]
+    public void Toolbar_UndoRedoButtons_AfterBold_KeepTheEditorReady()
+    {
+        var window = OpenWith("buy milk");
+        Click(window, window.FindControl<ToggleButton>("EditModeButton")!);
+        var editor = Editor(window);
+        editor.SelectionStart = 4;
+        editor.SelectionEnd = 8;
+        Click(window, window.FindControl<Button>("BoldButton")!);
+
+        var undo = window.FindControl<Button>("UndoButton")!;
+        var redo = window.FindControl<Button>("RedoButton")!;
+        Assert.True(undo.IsEnabled);
+        Assert.False(redo.IsEnabled);
+        Click(window, undo);
+        Assert.Equal("buy milk", NoteOf(window).Content);
+        Assert.True(editor.IsFocused);
+        Assert.True(redo.IsEnabled);
+        Click(window, redo);
+        Assert.Equal("buy **milk**", NoteOf(window).Content);
+        Assert.True(editor.IsFocused);
+    }
+
+    [AvaloniaFact]
+    public void Toolbar_AtDefaultWidth_KeepsLinkAndModeButtonsOnTheSameRow()
+    {
+        var window = OpenWith("buy milk");
+        Click(window, window.FindControl<ToggleButton>("EditModeButton")!);
+        var link = window.FindControl<Button>("LinkButton")!;
+        var mode = window.FindControl<ToggleButton>("EditModeButton")!;
+        var linkRight = link.TranslatePoint(new Point(link.Bounds.Width, 0), window)!.Value.X;
+        var modeLeft = mode.TranslatePoint(new Point(0, 0), window)!.Value.X;
+
+        Assert.True(linkRight <= modeLeft, $"Link ends at {linkRight}, while Edit starts at {modeLeft}");
+    }
+
+    [AvaloniaFact]
+    public void Toolbar_HeadingAcrossTwoLines_UndoesAsOneStep()
+    {
+        var window = OpenWith("alpha\nbeta");
+        Click(window, window.FindControl<ToggleButton>("EditModeButton")!);
+        var editor = Editor(window);
+        editor.SelectionStart = 1;
+        editor.SelectionEnd = 8;
+        var choice = window.FindControl<ComboBox>("HeadingChoice")!;
+        Click(window, choice);
+        Click(window, (ComboBoxItem)choice.Items[2]!);
+        Assert.Equal("## alpha\n## beta", NoteOf(window).Content);
+
+        editor.Undo();
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal("alpha\nbeta", NoteOf(window).Content);
+        editor.Redo();
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal("## alpha\n## beta", NoteOf(window).Content);
+    }
+
+    [AvaloniaFact]
+    public void Toolbar_LinkWithSelectedText_UndoesAsOneStep()
+    {
+        var window = OpenWith("read docs");
+        Click(window, window.FindControl<ToggleButton>("EditModeButton")!);
+        var editor = Editor(window);
+        editor.SelectionStart = 5;
+        editor.SelectionEnd = 9;
+        Click(window, window.FindControl<Button>("LinkButton")!);
+        Assert.Equal("read [docs]()", NoteOf(window).Content);
+
+        editor.Undo();
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal("read docs", NoteOf(window).Content);
+        editor.Redo();
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal("read [docs]()", NoteOf(window).Content);
+    }
+
+    [AvaloniaFact]
+    public void Toolbar_BoldThenCtrlZAndCtrlY_UsesTheSameHistory()
+    {
+        var window = OpenWith("buy milk");
+        Click(window, window.FindControl<ToggleButton>("EditModeButton")!);
+        var editor = Editor(window);
+        editor.SelectionStart = 4;
+        editor.SelectionEnd = 8;
+        Click(window, window.FindControl<Button>("BoldButton")!);
+        Assert.Equal("buy **milk**", NoteOf(window).Content);
+
+        window.KeyPress(Key.Z, RawInputModifiers.Control, PhysicalKey.Z, null);
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal("buy milk", NoteOf(window).Content);
+        window.KeyPress(Key.Y, RawInputModifiers.Control, PhysicalKey.Y, null);
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal("buy **milk**", NoteOf(window).Content);
+    }
+
+    [AvaloniaFact]
+    public void Toolbar_EditingExistingLink_UndoesAndRedoesTheAddressChange()
+    {
+        var window = OpenWith("[docs](https://old.test)");
+        Click(window, window.FindControl<ToggleButton>("EditModeButton")!);
+        Editor(window).CaretIndex = 2;
+        Click(window, window.FindControl<Button>("LinkButton")!);
+        window.LinkEditor.AddressInput.Text = "https://new.test";
+        window.LinkEditor.ApplyButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal("[docs](https://new.test)", NoteOf(window).Content);
+
+        Editor(window).Undo();
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal("[docs](https://old.test)", NoteOf(window).Content);
+        Editor(window).Redo();
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal("[docs](https://new.test)", NoteOf(window).Content);
+    }
+
+    [AvaloniaFact]
+    public void Editor_ContinuingAList_UndoesWithTheSameButtons()
+    {
+        var window = OpenWith("- [ ] milk");
+        Click(window, window.FindControl<ToggleButton>("EditModeButton")!);
+        Editor(window).CaretIndex = Editor(window).Text!.Length;
+
+        window.KeyPress(Key.Enter, RawInputModifiers.None, PhysicalKey.Enter, null);
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal("- [ ] milk\n- [ ] ", NoteOf(window).Content);
+
+        Click(window, window.FindControl<Button>("UndoButton")!);
+        Assert.Equal("- [ ] milk", NoteOf(window).Content);
+    }
+
+    [AvaloniaFact]
+    public void Toolbar_InEdit_AppearsOppositeTheModeButtonsWithoutAnotherClick()
+    {
+        var window = OpenWith("milk");
+        var edit = window.FindControl<ToggleButton>("EditModeButton")!;
+        var previewTop = edit.TranslatePoint(new Point(0, 0), window)!.Value.Y;
+
+        Click(window, edit);
+
+        var bold = window.FindControl<Button>("BoldButton")!;
+        Assert.True(bold.IsEffectivelyVisible);
+        var editPosition = edit.TranslatePoint(new Point(0, 0), window)!.Value;
+        var boldPosition = bold.TranslatePoint(new Point(0, 0), window)!.Value;
+        Assert.True(editPosition.X > boldPosition.X + bold.Bounds.Width);
+        Assert.InRange(Math.Abs(editPosition.Y - boldPosition.Y), 0, 3);
+        Assert.InRange(Math.Abs(previewTop - editPosition.Y), 0, 1);
+    }
+
+    [AvaloniaFact]
+    public void Toolbar_HeadingChoice_WithSelectionInTwoLines_StylesBoth()
+    {
+        var window = OpenWith("alpha\nbeta");
+        Click(window, window.FindControl<ToggleButton>("EditModeButton")!);
+        var body = Editor(window);
+        body.SelectionStart = 0;
+        body.SelectionEnd = 8;
+
+        window.FindControl<ComboBox>("HeadingChoice")!.SelectedIndex = 2;
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal("## alpha\n## beta", NoteOf(window).Content);
+        Assert.Equal((3, 14), (body.SelectionStart, body.SelectionEnd));
+    }
+
+    [AvaloniaFact]
+    public void Toolbar_HeadingChoice_AfterMouseOpensIt_StylesAllSelectedLines()
+    {
+        var window = OpenWith("Valei-me!\nTestando\nEsse não");
+        Click(window, window.FindControl<ToggleButton>("EditModeButton")!);
+        var body = Editor(window);
+        body.SelectionStart = 0;
+        body.SelectionEnd = "Valei-me!\nTest".Length;
+
+        var heading = window.FindControl<ComboBox>("HeadingChoice")!;
+        Click(window, heading);
+        Assert.True(heading.IsDropDownOpen);
+        Click(window, (ComboBoxItem)heading.Items[4]!);
+
+        Assert.Equal("#### Valei-me!\n#### Testando\nEsse não", NoteOf(window).Content);
+    }
+
+    [AvaloniaFact]
+    public void Toolbar_LinkButton_WithSelection_WaitsForAddressInTheEditor()
+    {
+        var window = OpenWith("read docs");
+        Click(window, window.FindControl<ToggleButton>("EditModeButton")!);
+        var body = Editor(window);
+        body.SelectionStart = 5;
+        body.SelectionEnd = 9;
+
+        Click(window, window.FindControl<Button>("LinkButton")!);
+
+        Assert.Equal("read [docs]()", NoteOf(window).Content);
+        Assert.Equal(12, body.CaretIndex);
+        Assert.True(body.IsFocused);
+        Assert.False(window.LinkEditor.IsOpen);
+    }
+
+    [AvaloniaFact]
+    public void Toolbar_LinkButton_AfterStartingAddress_AcceptsTypingInPlace()
+    {
+        var window = OpenWith("read docs");
+        Click(window, window.FindControl<ToggleButton>("EditModeButton")!);
+        Editor(window).SelectionStart = 5;
+        Editor(window).SelectionEnd = 9;
+        Click(window, window.FindControl<Button>("LinkButton")!);
+
+        window.KeyTextInput("https://example.com");
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal("read [docs](https://example.com)", NoteOf(window).Content);
+        Assert.True(Editor(window).IsFocused);
+    }
+
+    [AvaloniaFact]
+    public void Toolbar_WithImageLineBeforeSelectedText_StylesTheSelectedLine()
+    {
+        const string image = "![imagem](file:///tmp/image.png)\n";
+        var window = OpenWith(image + "Maravilhoso!");
+        Click(window, window.FindControl<ToggleButton>("EditModeButton")!);
+        Editor(window).SelectionStart = image.Length;
+        Editor(window).SelectionEnd = image.Length + "Maravilhoso!".Length;
+        Assert.True(window.FindControl<ComboBox>("HeadingChoice")!.IsEnabled);
+        Assert.True(window.FindControl<Button>("LinkButton")!.IsEnabled);
+
+        window.FindControl<ComboBox>("HeadingChoice")!.SelectedIndex = 2;
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(image + "## Maravilhoso!", NoteOf(window).Content);
+    }
+
+    [AvaloniaFact]
+    public void Toolbar_WithSelectedText_KeepsStyleAndLinkAvailable()
+    {
+        var window = OpenWith("buy milk");
+        Click(window, window.FindControl<ToggleButton>("EditModeButton")!);
+        var editor = Editor(window);
+        editor.SelectionStart = 4;
+        editor.SelectionEnd = 8;
+
+
+        Assert.True(window.FindControl<ComboBox>("HeadingChoice")!.IsEnabled);
+        Assert.True(window.FindControl<Button>("LinkButton")!.IsEnabled);
+    }
+
+    [AvaloniaFact]
+    public void Toolbar_ItalicButton_UsesTheSameMarkdownAsCtrlI()
+    {
+        var window = OpenWith("buy milk");
+        Click(window, window.FindControl<ToggleButton>("EditModeButton")!);
+        var editor = Editor(window);
+        editor.SelectionStart = 4;
+        editor.SelectionEnd = 8;
+
+        Click(window, window.FindControl<Button>("ItalicButton")!);
+
+        Assert.Equal("buy *milk*", NoteOf(window).Content);
+        Assert.Equal((5, 9), (editor.SelectionStart, editor.SelectionEnd));
+    }
+
+    [AvaloniaFact]
+    public void Toolbar_HeadingChoice_ChangesOnlyTheCurrentBlock()
+    {
+        var window = OpenWith("milk\r\nbread");
+        Click(window, window.FindControl<ToggleButton>("EditModeButton")!);
+        var editor = Editor(window);
+        editor.CaretIndex = 2;
+
+        window.FindControl<ComboBox>("HeadingChoice")!.SelectedIndex = 2;
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal("## milk\r\nbread", NoteOf(window).Content);
+        Assert.Equal(5, editor.CaretIndex);
+    }
+
+    [AvaloniaFact]
+    public void Toolbar_WhenSwitchingModes_FollowsEditWithoutChangingContent()
+    {
+        var window = OpenWith("milk");
+        Click(window, window.FindControl<ToggleButton>("EditModeButton")!);
+        Assert.True(window.FindControl<Button>("BoldButton")!.IsEffectivelyVisible);
+
+        Click(window, window.FindControl<ToggleButton>("PreviewModeButton")!);
+        Assert.False(window.FindControl<Button>("BoldButton")!.IsEffectivelyVisible);
+
+        Click(window, window.FindControl<ToggleButton>("EditModeButton")!);
+
+        Assert.True(window.FindControl<Button>("BoldButton")!.IsEffectivelyVisible);
+        Assert.Equal("milk", NoteOf(window).Content);
+    }
+
+    [AvaloniaFact]
+    public void Toolbar_LinkButton_InsertsLinkAndRestoresTheEditorSelection()
+    {
+        var window = OpenWith("read ");
+        Click(window, window.FindControl<ToggleButton>("EditModeButton")!);
+        var body = Editor(window);
+        body.CaretIndex = 5;
+
+        Click(window, window.FindControl<Button>("LinkButton")!);
+        Assert.True(window.LinkEditor.IsOpen);
+        Assert.True(NoteOf(window).IsEditing);
+        window.LinkEditor.TextInput.Text = "docs";
+        window.LinkEditor.AddressInput.Text = "https://example.com";
+        window.LinkEditor.ApplyButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal("read [docs](https://example.com)", NoteOf(window).Content);
+        Assert.Equal((6, 10), (body.SelectionStart, body.SelectionEnd));
+        Assert.True(body.IsFocused);
+    }
+
+    [AvaloniaFact]
+    public void Toolbar_LinkButton_CancelKeepsTheMarkdownAndFocus()
+    {
+        var window = OpenWith("read docs");
+        Click(window, window.FindControl<ToggleButton>("EditModeButton")!);
+        var body = Editor(window);
+        body.CaretIndex = 5;
+
+        Click(window, window.FindControl<Button>("LinkButton")!);
+        window.LinkEditor.CancelButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal("read docs", NoteOf(window).Content);
+        Assert.Equal((5, 5), (body.SelectionStart, body.SelectionEnd));
+        Assert.True(body.IsFocused);
+    }
+
+    [AvaloniaFact]
+    public void Toolbar_LinkButton_InvalidAddressKeepsTheMarkdown()
+    {
+        var window = OpenWith("read docs");
+        Click(window, window.FindControl<ToggleButton>("EditModeButton")!);
+        Editor(window).CaretIndex = 5;
+
+        Click(window, window.FindControl<Button>("LinkButton")!);
+        window.LinkEditor.TextInput.Text = "docs";
+        window.LinkEditor.AddressInput.Text = "file:///tmp/a";
+        window.LinkEditor.ApplyButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal("read docs", NoteOf(window).Content);
+        Assert.True(Editor(window).IsFocused);
+    }
+
+    [AvaloniaFact]
+    public void Toolbar_LinkButton_ExistingLinkStartsWithItsTextAndAddress()
+    {
+        var window = OpenWith("[docs](https://old.test)");
+        Click(window, window.FindControl<ToggleButton>("EditModeButton")!);
+        Editor(window).CaretIndex = 2;
+
+        Click(window, window.FindControl<Button>("LinkButton")!);
+
+        Assert.Equal("docs", window.LinkEditor.TextInput.Text);
+        Assert.Equal("https://old.test", window.LinkEditor.AddressInput.Text);
+    }
+
+    [AvaloniaFact]
+    public void Toolbar_AtMinimumSize_LeavesRoomForEditor()
+    {
+        var window = OpenWith("milk");
+        window.Width = 180;
+        window.Height = 140;
+        Dispatcher.UIThread.RunJobs();
+        Click(window, window.FindControl<ToggleButton>("EditModeButton")!);
+
+        Assert.True(window.FindControl<Button>("BoldButton")!.IsEffectivelyVisible);
+        Assert.True(window.FindControl<Button>("LinkButton")!.IsEffectivelyVisible);
+        Assert.True(Editor(window).Bounds.Height > 0);
+        Assert.True(window.FindControl<Grid>("Header")!.Bounds.Height > 0);
+    }
+
+    [AvaloniaFact]
+    public void Toolbar_OnANoteWithLinks_LeavesTheExistingLinkBarAvailable()
+    {
+        var window = OpenWith("https://example.com");
+        Click(window, window.FindControl<ToggleButton>("EditModeButton")!);
+
+        Assert.True(window.FindControl<ItemsControl>("LinkBar")!.IsEffectivelyVisible);
+        Assert.True(Editor(window).IsEffectivelyVisible);
+    }
+
+    [AvaloniaFact]
+    public void Toolbar_AfterReturningToPreview_TasksStillTickInPlace()
+    {
+        var window = OpenWith("- [ ] milk");
+        Click(window, window.FindControl<ToggleButton>("EditModeButton")!);
+        Click(window, window.FindControl<ToggleButton>("PreviewModeButton")!);
+
+        Press(window, Line(window, 0), 0);
+
+        Assert.Equal("- [x] milk", NoteOf(window).Content);
+        Assert.True(ShowsFormatted(window));
+    }
+
+    [AvaloniaFact]
+    public void Toolbar_OnATask_DisablesHeadingButAllowsLinkOnItsText()
+    {
+        var window = OpenWith("- [ ] milk");
+        Click(window, window.FindControl<ToggleButton>("EditModeButton")!);
+        Editor(window).CaretIndex = 7;
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.False(window.FindControl<ComboBox>("HeadingChoice")!.IsEnabled);
+        Assert.True(window.FindControl<Button>("LinkButton")!.IsEnabled);
+    }
+
+    [AvaloniaFact]
+    public void Toolbar_WhenEditorsPasteMenuOpens_KeepsTheEditorVisible()
+    {
+        var window = OpenWith("milk");
+        Click(window, window.FindControl<ToggleButton>("EditModeButton")!);
+        var editor = Editor(window);
+        var inEditor = editor.TranslatePoint(new Point(10, 10), window)!.Value;
+
+        window.MouseDown(inEditor, MouseButton.Right);
+        window.MouseUp(inEditor, MouseButton.Right);
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.True(editor.ContextFlyout is PopupFlyoutBase { IsOpen: true });
+        Assert.True(editor.IsEffectivelyVisible);
     }
 
     [AvaloniaFact]

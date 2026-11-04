@@ -31,6 +31,7 @@ public sealed partial class NoteViewModel : ObservableObject
     private readonly TimeProvider _timeProvider;
     private readonly IUiDispatcher _ui;
     private readonly ILinkLauncher _links;
+    private ILinkEditor? _linkEditor;
 
     /// <param name="timeProvider">
     /// Used by the timer, if the note has one. Defaults to the system clock so
@@ -450,6 +451,68 @@ public sealed partial class NoteViewModel : ObservableObject
 
         var edit = MarkdownEmphasis.Toggle(_note.Content, selectionStart, selectionEnd, emphasis);
         Content = edit.Content;
+        return (edit.SelectionStart, edit.SelectionEnd);
+    }
+
+    /// <summary>Apply a normal or H1–H4 style to the editor's current line.</summary>
+    public (int Start, int End) SetHeading(int selectionStart, int selectionEnd, int level)
+    {
+        if (!IsEditing)
+        {
+            return (selectionStart, selectionEnd);
+        }
+
+        var edit = MarkdownHeading.SetLevel(_note.Content, selectionStart, selectionEnd, level);
+        if (edit.Content != _note.Content)
+        {
+            Content = edit.Content;
+        }
+
+        return (edit.SelectionStart, edit.SelectionEnd);
+    }
+
+    /// <summary>Supply a window-owned prompt for links when this note is shown.</summary>
+    public void SetLinkEditor(ILinkEditor editor) => _linkEditor = editor ?? throw new ArgumentNullException(nameof(editor));
+
+    /// <summary>Turn selected text into a link whose address is ready to type.</summary>
+    public (int Start, int End) StartLinkAtSelection(int selectionStart, int selectionEnd)
+    {
+        if (!IsEditing)
+        {
+            return (selectionStart, selectionEnd);
+        }
+
+        var edit = MarkdownLinks.BeginAtSelection(_note.Content, selectionStart, selectionEnd);
+        if (edit.Content != _note.Content)
+        {
+            Content = edit.Content;
+        }
+
+        return (edit.SelectionStart, edit.SelectionEnd);
+    }
+
+    /// <summary>Ask for link details, then apply one validated Markdown edit.</summary>
+    public async Task<(int Start, int End)> EditLinkAsync(int selectionStart, int selectionEnd)
+    {
+        if (!IsEditing || _linkEditor is null)
+        {
+            return (selectionStart, selectionEnd);
+        }
+
+        var original = _note.Content;
+        var initial = MarkdownLinks.Initial(original, selectionStart, selectionEnd);
+        var answer = await _linkEditor.EditAsync(initial);
+        if (answer is null || _note.Content != original || !IsEditing)
+        {
+            return (selectionStart, selectionEnd);
+        }
+
+        var edit = MarkdownLinks.Apply(original, selectionStart, selectionEnd, answer.Text, answer.Address);
+        if (edit.Content != original)
+        {
+            Content = edit.Content;
+        }
+
         return (edit.SelectionStart, edit.SelectionEnd);
     }
 

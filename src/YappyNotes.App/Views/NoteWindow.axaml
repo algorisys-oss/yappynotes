@@ -119,8 +119,9 @@
         </Style>
 
         <Style Selector="ToggleButton.mode">
+            <Setter Property="MinWidth" Value="0" />
             <Setter Property="MinHeight" Value="0" />
-            <Setter Property="Height" Value="22" />
+            <Setter Property="Height" Value="24" />
             <Setter Property="Padding" Value="6,1" />
             <Setter Property="FontSize" Value="11" />
             <Setter Property="Foreground" Value="#333333" />
@@ -130,6 +131,14 @@
         <Style Selector="ToggleButton.mode:checked">
             <Setter Property="FontWeight" Value="SemiBold" />
             <Setter Property="Background" Value="#22000000" />
+        </Style>
+        <Style Selector="Button.format">
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="Height" Value="24" />
+            <Setter Property="MinWidth" Value="20" />
+            <Setter Property="Padding" Value="4,1" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Background" Value="Transparent" />
         </Style>
     </Window.Styles>
 
@@ -408,29 +417,57 @@
             </Grid>
         </Border>
 
-        <!-- Keep mode controls inside the body; the title strip remains free to
-             drag a narrow note. Both views share the remaining body space. -->
+        <!-- Formatting stays at the left; the mode switch stays at the right.
+             The row keeps the same height as controls appear and disappear. -->
         <Grid Grid.Row="2" RowDefinitions="Auto,*">
-        <StackPanel Grid.Row="0"
-                    x:Name="ModeBar"
-                    Orientation="Horizontal"
-                    HorizontalAlignment="Right"
-                    Spacing="2"
-                    Margin="4,2,6,1">
-            <ToggleButton x:Name="EditModeButton"
-                          Classes="mode"
-                          Content="Edit"
-                          ToolTip.Tip="Edit Markdown source"
-                          IsChecked="{Binding ShowsEditor, Mode=OneWay}"
-                          Command="{Binding ShowEditCommand}" />
-            <ToggleButton x:Name="PreviewModeButton"
-                          Classes="mode"
-                          Content="Preview"
-                          ToolTip.Tip="Preview formatted note"
-                          IsChecked="{Binding !ShowsEditor, Mode=OneWay}"
-                          IsEnabled="{Binding HasPreviewContent}"
-                          Command="{Binding ShowPreviewCommand}" />
-        </StackPanel>
+        <Grid Grid.Row="0" x:Name="ModeBar" ColumnDefinitions="*,Auto"
+              Height="24" Margin="4,2,6,1">
+            <ScrollViewer Grid.Column="0" Height="24"
+                          HorizontalScrollBarVisibility="Hidden"
+                          VerticalScrollBarVisibility="Disabled">
+                <StackPanel Orientation="Horizontal" IsVisible="{Binding ShowsEditor}">
+                    <Button x:Name="UndoButton" Classes="format" Width="20" Content="&#x21B6;"
+                            AutomationProperties.Name="Undo" ToolTip.Tip="Undo (Ctrl+Z)" />
+                    <Button x:Name="RedoButton" Classes="format" Width="20" Content="&#x21B7;"
+                            AutomationProperties.Name="Redo" ToolTip.Tip="Redo (Ctrl+Y)" />
+                    <Button x:Name="BoldButton" Classes="format" Width="20" Content="B"
+                            FontWeight="Bold" AutomationProperties.Name="Bold"
+                            ToolTip.Tip="Bold (Ctrl+B)" />
+                    <Button x:Name="ItalicButton" Classes="format" Width="20" Content="I"
+                            FontStyle="Italic" AutomationProperties.Name="Italic"
+                            ToolTip.Tip="Italic (Ctrl+I)" />
+                    <ComboBox x:Name="HeadingChoice" Width="58" Height="24"
+                              FontSize="11" PlaceholderText="Style"
+                              AutomationProperties.Name="Text style"
+                              ToolTip.Tip="Normal text or heading level">
+                        <ComboBoxItem Content="Normal" />
+                        <ComboBoxItem Content="H1" />
+                        <ComboBoxItem Content="H2" />
+                        <ComboBoxItem Content="H3" />
+                        <ComboBoxItem Content="H4" />
+                    </ComboBox>
+                    <Button x:Name="LinkButton" Classes="format" Width="33" Content="Link"
+                            FontSize="11" Padding="2,1"
+                            AutomationProperties.Name="Insert or edit link"
+                            ToolTip.Tip="Insert or edit link" />
+                </StackPanel>
+            </ScrollViewer>
+            <StackPanel Grid.Column="1" Orientation="Horizontal">
+                <ToggleButton x:Name="EditModeButton"
+                              Classes="mode"
+                              Width="34"
+                              Content="Edit"
+                              ToolTip.Tip="Edit Markdown source"
+                              Command="{Binding ShowEditCommand}" />
+                <ToggleButton x:Name="PreviewModeButton"
+                              Classes="mode"
+                              Width="56"
+                              Content="Preview"
+                              ToolTip.Tip="Preview formatted note"
+                              IsEnabled="{Binding HasPreviewContent}"
+                              Command="{Binding ShowPreviewCommand}" />
+            </StackPanel>
+        </Grid>
 
         <!-- The note at rest: its Markdown drawn formatted. A press on it either
              does something (a box, a link) or opens the editor below with the
