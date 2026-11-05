@@ -32,6 +32,7 @@ public sealed partial class NoteViewModel : ObservableObject
     private readonly IUiDispatcher _ui;
     private readonly ILinkLauncher _links;
     private ILinkEditor? _linkEditor;
+    private PreviewSelection? _previewTextSelection;
 
     /// <param name="timeProvider">
     /// Used by the timer, if the note has one. Defaults to the system clock so
@@ -83,6 +84,11 @@ public sealed partial class NoteViewModel : ObservableObject
         get => _note.Content;
         set
         {
+            if (_note.Content != value)
+            {
+                ClearPreviewTextSelection();
+            }
+
             // An empty note shows the editor because there is nothing to format, not
             // because it is being edited. A change arriving while that editor is the
             // one showing is typing into it, and the first letter must not turn the
@@ -123,6 +129,34 @@ public sealed partial class NoteViewModel : ObservableObject
 
     /// <summary>The note's Markdown, parsed into the lines the formatted view draws.</summary>
     public IReadOnlyList<NoteLine> Lines { get; private set; } = [];
+
+    /// <summary>Safe source offsets of text currently highlighted in Preview.</summary>
+    public PreviewSelection? PreviewTextSelection => _previewTextSelection;
+
+    /// <summary>Accept only a selection mappable to the note's current Markdown.</summary>
+    public void SelectPreviewText(int anchorLine, int anchorBoundary, int focusLine, int focusBoundary)
+    {
+        if (ShowsEditor)
+        {
+            ClearPreviewTextSelection();
+            return;
+        }
+
+        _previewTextSelection = PreviewSelection.FromRendered(_note.Content, Lines,
+            anchorLine, anchorBoundary, focusLine, focusBoundary);
+        OnPropertyChanged(nameof(PreviewTextSelection));
+    }
+
+    public void ClearPreviewTextSelection()
+    {
+        if (_previewTextSelection is null)
+        {
+            return;
+        }
+
+        _previewTextSelection = null;
+        OnPropertyChanged(nameof(PreviewTextSelection));
+    }
 
     /// <summary>
     /// Whether the reader is typing in the Markdown rather than looking at it
@@ -527,6 +561,11 @@ public sealed partial class NoteViewModel : ObservableObject
         if (IsEditing == editing)
         {
             return;
+        }
+
+        if (editing)
+        {
+            ClearPreviewTextSelection();
         }
 
         IsEditing = editing;

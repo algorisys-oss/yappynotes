@@ -486,6 +486,7 @@
             <StackPanel VerticalAlignment="Top">
                 <views:FormattedNote x:Name="Formatted"
                                      Lines="{Binding Lines}"
+                                     Selection="{Binding PreviewTextSelection}"
                                      AddRowPosition="{Binding NewTodoPosition}"
                                      TextElement.Foreground="#1a1a1a">
                     <!-- The list's own last line: "+ Add a to-do" at rest, and a new

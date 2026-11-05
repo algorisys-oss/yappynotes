@@ -21,6 +21,7 @@ public sealed class WindowManager : IWindowManager
     private SettingsWindow? _settingsWindow;
     private readonly Dictionary<Guid, NoteWindow> _open = [];
     private readonly Dictionary<Guid, NoteViewModel> _viewModels = [];
+    private readonly IWindowActivationGroup _windowGroup = WindowActivationGroup.ForCurrentPlatform();
 
     /// <param name="newSettings">
     /// How to build the settings view-model, when one is wanted. A factory
@@ -39,6 +40,8 @@ public sealed class WindowManager : IWindowManager
     }
 
     public IReadOnlyCollection<Guid> OpenNotes => _open.Keys;
+
+    internal NoteWindow? WindowFor(Guid noteId) => _open.GetValueOrDefault(noteId);
 
     /// <summary>The live view-model for a note, if one has been built.</summary>
     public NoteViewModel? ViewModelFor(Guid noteId) => _viewModels.GetValueOrDefault(noteId);
@@ -62,6 +65,8 @@ public sealed class WindowManager : IWindowManager
         }
 
         var window = new NoteWindow(viewModel);
+        window.ShowInTaskbar = _windowGroup.ShowNotesInTaskbar;
+        _windowGroup.Register(window);
         _open[noteId] = window;
 
         // However it closed - its own button, or the archive command - the
@@ -118,6 +123,7 @@ public sealed class WindowManager : IWindowManager
         }
 
         var window = new ManagerWindow();
+        _windowGroup.Register(window);
         window.Bind(new ManagerViewModel(_notes, this));
         window.Closed += (_, _) => OpenManager = null;
         OpenManager = window;

@@ -96,4 +96,38 @@ public sealed record NoteLine(MarkdownBlock Block, string Marker)
 
         return lineEnd;
     }
+
+    /// <summary>
+    /// Maps a boundary in the drawn text to its Markdown offset. At a boundary
+    /// between runs, choose the next run for a selection's start and the previous
+    /// run for its end, so hidden emphasis/link syntax is never included merely
+    /// because the user selected the visible text beside it.
+    /// </summary>
+    public int? SourceBoundaryAt(int renderedBoundary, bool startOfSelection)
+    {
+        if (renderedBoundary < Marker.Length)
+        {
+            return null;
+        }
+
+        var drawn = Marker.Length;
+        int? previousEnd = null;
+        foreach (var run in Block.Runs)
+        {
+            if (renderedBoundary == drawn)
+            {
+                return startOfSelection ? run.SourceStart : previousEnd ?? run.SourceStart;
+            }
+
+            if (renderedBoundary < drawn + run.Text.Length)
+            {
+                return run.SourceStart + renderedBoundary - drawn;
+            }
+
+            drawn += run.Text.Length;
+            previousEnd = run.SourceStart + run.Text.Length;
+        }
+
+        return renderedBoundary == drawn ? previousEnd : null;
+    }
 }

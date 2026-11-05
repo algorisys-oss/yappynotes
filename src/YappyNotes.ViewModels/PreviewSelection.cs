@@ -28,6 +28,32 @@ public sealed class PreviewSelection
     /// <summary>Zero-based indices of source blocks containing selected text.</summary>
     public IReadOnlyList<int> Blocks { get; }
 
+    /// <summary>Maps boundaries in the rendered lines to a safe source interval.</summary>
+    public static PreviewSelection? FromRendered(string content, IReadOnlyList<NoteLine> lines,
+        int anchorLine, int anchorBoundary, int focusLine, int focusBoundary)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        ArgumentNullException.ThrowIfNull(lines);
+        if (anchorLine < 0 || anchorLine >= lines.Count || focusLine < 0 || focusLine >= lines.Count)
+        {
+            return null;
+        }
+
+        var forward = anchorLine < focusLine || (anchorLine == focusLine && anchorBoundary < focusBoundary);
+        var startLine = forward ? anchorLine : focusLine;
+        var startBoundary = forward ? anchorBoundary : focusBoundary;
+        var endLine = forward ? focusLine : anchorLine;
+        var endBoundary = forward ? focusBoundary : anchorBoundary;
+        var start = lines[startLine].SourceBoundaryAt(startBoundary, startOfSelection: true);
+        var end = lines[endLine].SourceBoundaryAt(endBoundary, startOfSelection: false);
+        if (start is null || end is null)
+        {
+            return null;
+        }
+
+        return forward ? TryCreate(content, start.Value, end.Value) : TryCreate(content, end.Value, start.Value);
+    }
+
     /// <summary>
     /// Validates a source interval already located by the view's text hit testing.
     /// Mapping a pointer gesture to these offsets belongs to a later UI step.

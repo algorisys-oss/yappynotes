@@ -53,6 +53,9 @@ public partial class NoteWindow : Window
         if (formatted is not null)
         {
             formatted.LinePressed += (_, e) => _ = _note?.PressAsync(e.Line, e.DrawnIndex, e.Trailing);
+            formatted.SelectionDragged += (_, e) => _note?.SelectPreviewText(
+                e.AnchorLine, e.AnchorBoundary, e.FocusLine, e.FocusBoundary);
+            formatted.SelectionCleared += (_, _) => _note?.ClearPreviewTextSelection();
         }
 
         // Presses on the paper around the text: a line would have handled its own.
@@ -191,6 +194,7 @@ public partial class NoteWindow : Window
         Deactivated += (_, _) =>
         {
             MarkActive(false);
+            _note?.ClearPreviewTextSelection();
 
             // Clicking another window is the most common way to finish typing.
             if (!_keepEditorOpen)
@@ -209,6 +213,7 @@ public partial class NoteWindow : Window
 
         if (_note is not null)
         {
+            _note.ClearPreviewTextSelection();
             _note.PropertyChanged -= OnNoteChanged;
         }
 
@@ -552,6 +557,8 @@ public partial class NoteWindow : Window
     {
         base.OnClosing(e);
 
+        _note?.ClearPreviewTextSelection();
+
         if (_closeConfirmed || _note is null || !HoldsCloseToFlush(e.CloseReason))
         {
             return;
@@ -722,6 +729,8 @@ public partial class NoteWindow : Window
         {
             return;
         }
+
+        _note?.ClearPreviewTextSelection();
 
         if (e.ClickCount == 2)
         {

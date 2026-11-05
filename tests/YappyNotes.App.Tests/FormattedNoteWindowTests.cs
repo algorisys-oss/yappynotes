@@ -87,6 +87,24 @@ public class FormattedNoteWindowTests
         Dispatcher.UIThread.RunJobs();
     }
 
+    private static Point InCharacter(NoteWindow window, TextBlock line, int index, bool trailing)
+    {
+        var box = line.TextLayout.HitTestTextPosition(index);
+        return line.TranslatePoint(new Point(box.X + box.Width * (trailing ? 0.75 : 0.25),
+            box.Y + box.Height / 2), window)!.Value;
+    }
+
+    private static void Drag(NoteWindow window, TextBlock fromLine, int fromIndex,
+        TextBlock toLine, int toIndex)
+    {
+        var from = InCharacter(window, fromLine, fromIndex, trailing: false);
+        var to = InCharacter(window, toLine, toIndex, trailing: true);
+        window.MouseDown(from, MouseButton.Left);
+        window.MouseMove(to);
+        window.MouseUp(to, MouseButton.Left);
+        Dispatcher.UIThread.RunJobs();
+    }
+
     private static void Click(NoteWindow window, Control control)
     {
         var centre = control.TranslatePoint(new Point(control.Bounds.Width / 2, control.Bounds.Height / 2), window)!.Value;
@@ -873,6 +891,171 @@ public class FormattedNoteWindowTests
 
         Assert.Equal([new Uri("https://example.com/docs")], _links.Opened);
         Assert.True(ShowsFormatted(window));
+    }
+
+    [AvaloniaFact]
+    public void DraggingPreviewText_HighlightsItWithoutOpeningTheEditor()
+    {
+        var window = OpenWith("milk bread");
+
+        Drag(window, Line(window, 0), 0, Line(window, 0), 3);
+
+        var selection = NoteOf(window).PreviewTextSelection;
+        Assert.NotNull(selection);
+        Assert.Equal((0, 4), (selection.Start, selection.End));
+        Assert.False(NoteOf(window).ShowsEditor);
+        Assert.Equal("milk bread", NoteOf(window).Content);
+        Assert.Same(selection, Formatted(window).Selection);
+        Assert.Equal("milk", string.Concat(Line(window, 0).Inlines!.OfType<Run>()
+            .Where(run => run.Background is not null).Select(run => run.Text)));
+    }
+
+    [AvaloniaFact]
+    public void DraggingPreviewTextAcrossLines_KeepsAReverseSelection()
+    {
+        var window = OpenWith("alpha\nbeta");
+
+        Drag(window, Line(window, 1), 2, Line(window, 0), 1);
+
+        var selection = NoteOf(window).PreviewTextSelection;
+        Assert.NotNull(selection);
+        Assert.Equal((8, 2), (selection.Anchor, selection.Focus));
+        Assert.Equal([0, 1], selection.Blocks);
+        Assert.False(NoteOf(window).ShowsEditor);
+    }
+
+    [AvaloniaFact]
+    public void DraggingFromALink_SelectsWithoutOpeningItsAddress()
+    {
+        var window = OpenWith("see [docs](https://example.com)");
+
+        Drag(window, Line(window, 0), 4, Line(window, 0), 7);
+
+        Assert.Empty(_links.Opened);
+        Assert.NotNull(NoteOf(window).PreviewTextSelection);
+    }
+
+    [AvaloniaFact]
+    public void DraggingFromACheckbox_DoesNotToggleIt()
+    {
+        var window = OpenWith("- [ ] milk");
+
+        Drag(window, Line(window, 0), 0, Line(window, 0), 5);
+
+        Assert.Equal("- [ ] milk", NoteOf(window).Content);
+        Assert.Null(NoteOf(window).PreviewTextSelection);
+    }
+
+    [AvaloniaFact]
+    public void DraggingAcrossAWrappedVisualLine_SelectsOneSourceBlock()
+    {
+        var window = OpenWith("alpha beta gamma delta epsilon zeta eta theta iota");
+        window.Width = 180;
+        Dispatcher.UIThread.RunJobs();
+        var line = Line(window, 0);
+        Assert.True(line.TextLayout.HitTestTextPosition(0).Y < line.TextLayout.HitTestTextPosition(25).Y);
+
+        Drag(window, line, 2, line, 25);
+
+        var selection = NoteOf(window).PreviewTextSelection;
+        Assert.NotNull(selection);
+        Assert.Equal([0], selection.Blocks);
+        Assert.Equal((2, 26), (selection.Start, selection.End));
+    }
+
+    [AvaloniaFact]
+    public void DraggingAfterScrolling_MapsTheVisibleLinesToTheirSource()
+    {
+        var content = string.Join('\n', Enumerable.Range(0, 30).Select(i => $"line {i:00}"));
+        var window = OpenWith(content);
+        window.Height = 140;
+        Dispatcher.UIThread.RunJobs();
+        var scroll = window.FindControl<ScrollViewer>("FormattedScroll")!;
+        scroll.Offset = new Vector(0, scroll.Extent.Height);
+        Dispatcher.UIThread.RunJobs();
+        var before = scroll.Offset.Y;
+
+        Drag(window, Line(window, 28), 0, Line(window, 29), 6);
+
+        var selection = NoteOf(window).PreviewTextSelection;
+        Assert.NotNull(selection);
+        Assert.Equal([28, 29], selection.Blocks);
+        Assert.Equal(content.IndexOf("line 28", StringComparison.Ordinal), selection.Start);
+        Assert.InRange(Math.Abs(before - scroll.Offset.Y), 0, 1);
+    }
+
+    [AvaloniaFact]
+    public void PreviewSelection_AfterContentReplacement_DisappearsBeforeItCanBeUsed()
+    {
+        var window = OpenWith("milk bread");
+        Drag(window, Line(window, 0), 0, Line(window, 0), 3);
+        Assert.NotNull(NoteOf(window).PreviewTextSelection);
+
+        NoteOf(window).Content = "changed";
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Null(NoteOf(window).PreviewTextSelection);
+        Assert.Null(Formatted(window).Selection);
+        Assert.DoesNotContain(Line(window, 0).Inlines!.OfType<Run>(), run => run.Background is not null);
+    }
+
+    [AvaloniaFact]
+    public void PreviewSelection_WhenContentChangesDuringDrag_DoesNotReappearOnRelease()
+    {
+        var window = OpenWith("milk bread");
+        var line = Line(window, 0);
+        var from = InCharacter(window, line, 0, trailing: false);
+        var to = InCharacter(window, line, 3, trailing: true);
+        window.MouseDown(from, MouseButton.Left);
+        window.MouseMove(to);
+        Assert.NotNull(NoteOf(window).PreviewTextSelection);
+
+        NoteOf(window).Content = "changed";
+        Dispatcher.UIThread.RunJobs();
+        window.MouseUp(to, MouseButton.Left);
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Null(NoteOf(window).PreviewTextSelection);
+        Assert.Equal("changed", NoteOf(window).Content);
+    }
+
+    [AvaloniaFact]
+    public void PreviewSelection_AfterClickingEdit_Disappears()
+    {
+        var window = OpenWith("milk bread");
+        Drag(window, Line(window, 0), 0, Line(window, 0), 3);
+        Assert.NotNull(NoteOf(window).PreviewTextSelection);
+
+        Click(window, window.FindControl<ToggleButton>("EditModeButton")!);
+
+        Assert.Null(NoteOf(window).PreviewTextSelection);
+        Assert.True(Editor(window).IsEffectivelyVisible);
+    }
+
+    [AvaloniaFact]
+    public void PreviewSelection_AfterClickingAnUnrelatedControl_StillPointsAtTheSameText()
+    {
+        var window = OpenWith("milk bread");
+        Drag(window, Line(window, 0), 0, Line(window, 0), 3);
+        var original = NoteOf(window).PreviewTextSelection;
+
+        Click(window, window.FindControl<Button>("ColorButton")!);
+
+        Assert.Same(original, NoteOf(window).PreviewTextSelection);
+        Assert.Equal("milk bread", NoteOf(window).Content);
+    }
+
+    [AvaloniaFact]
+    public void PreviewSelection_AfterClickingTheActivePreviewControl_StillPointsAtTheSameText()
+    {
+        var window = OpenWith("milk bread");
+        Drag(window, Line(window, 0), 0, Line(window, 0), 3);
+        var original = NoteOf(window).PreviewTextSelection;
+
+        Click(window, window.FindControl<ToggleButton>("PreviewModeButton")!);
+
+        Assert.Same(original, NoteOf(window).PreviewTextSelection);
+        Assert.False(NoteOf(window).ShowsEditor);
     }
 
     [AvaloniaFact]

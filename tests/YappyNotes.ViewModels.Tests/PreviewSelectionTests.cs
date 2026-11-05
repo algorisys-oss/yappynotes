@@ -1,9 +1,66 @@
+using YappyNotes.Core;
 using YappyNotes.ViewModels;
 
 namespace YappyNotes.ViewModels.Tests;
 
 public class PreviewSelectionTests
 {
+    [Theory]
+    [InlineData("buy milk", 4, 8, 4, 8)]
+    [InlineData("buy **milk**", 4, 8, 6, 10)]
+    [InlineData("## milk", 0, 4, 3, 7)]
+    [InlineData("see [docs](https://example.com)", 4, 8, 5, 9)]
+    public void FromRendered_VisibleText_UsesRunSourceOffsets(string content,
+        int anchor, int focus, int sourceAnchor, int sourceFocus)
+    {
+        var lines = NoteMarkdown.Parse(content).Select(block => NoteLine.For(block)).ToArray();
+
+        var selection = PreviewSelection.FromRendered(content, lines, 0, anchor, 0, focus);
+
+        Assert.NotNull(selection);
+        Assert.Equal((sourceAnchor, sourceFocus), (selection.Anchor, selection.Focus));
+    }
+
+    [Fact]
+    public void FromRendered_ReversedAcrossVisualLines_PreservesDirection()
+    {
+        const string content = "first\nsecond";
+        var lines = NoteMarkdown.Parse(content).Select(block => NoteLine.For(block)).ToArray();
+
+        var selection = PreviewSelection.FromRendered(content, lines, 1, 4, 0, 2);
+
+        Assert.NotNull(selection);
+        Assert.Equal((10, 2), (selection.Anchor, selection.Focus));
+        Assert.Equal([0, 1], selection.Blocks);
+    }
+
+    [Fact]
+    public void FromRendered_OneWrappedLine_MapsBothVisualRowsIntoItsRun()
+    {
+        const string content = "alpha beta gamma delta";
+        var lines = NoteMarkdown.Parse(content).Select(block => NoteLine.For(block)).ToArray();
+
+        var selection = PreviewSelection.FromRendered(content, lines, 0, 3, 0, 16);
+
+        Assert.NotNull(selection);
+        Assert.Equal((3, 16), (selection.Start, selection.End));
+    }
+
+    [Theory]
+    [InlineData("buy **milk**", 2, 8)]
+    [InlineData("see [docs](https://example.com)", 2, 8)]
+    [InlineData("use `code` now", 4, 8)]
+    [InlineData("- [ ] milk", 0, 7)]
+    [InlineData("- milk", 0, 5)]
+    public void FromRendered_AmbiguousOrUneditableText_RejectsWholeRange(string content, int start, int end)
+    {
+        var lines = NoteMarkdown.Parse(content).Select(block => NoteLine.For(block)).ToArray();
+
+        var selection = PreviewSelection.FromRendered(content, lines, 0, start, 0, end);
+
+        Assert.Null(selection);
+    }
+
     [Fact]
     public void TryCreate_VisibleWord_ReturnsSourceAnchorsAndBlock()
     {

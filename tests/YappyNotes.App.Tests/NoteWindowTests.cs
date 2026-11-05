@@ -87,6 +87,15 @@ public class NoteWindowTests
     }
 
     [AvaloniaFact]
+    public async Task NoteWindow_OnLinux_IsAvailableToWindowSwitcher()
+    {
+        var note = await _notes.CreateAsync();
+        await _windows.ShowNoteAsync(note.Id);
+
+        Assert.Equal(OperatingSystem.IsLinux(), _windows.WindowFor(note.Id)!.ShowInTaskbar);
+    }
+
+    [AvaloniaFact]
     public void NoteWindow_BoundToANote_TakesTheSizeTheNoteRemembers()
     {
         var viewModel = NewViewModel(note =>
