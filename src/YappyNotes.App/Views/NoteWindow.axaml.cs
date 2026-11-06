@@ -43,6 +43,8 @@ public partial class NoteWindow : Window
             header.PointerPressed += OnHeaderPressed;
         }
 
+        SizeChanged += (_, _) => UpdateToolbarLayout();
+
         var grip = this.FindControl<Panel>("ResizeGrip");
         if (grip is not null)
         {
@@ -564,9 +566,18 @@ public partial class NoteWindow : Window
         this.FindControl<Button>("LinkButton")!.IsEnabled = editing || _note?.CanPreviewLink == true;
     }
 
+    private void UpdateToolbarLayout()
+    {
+        var formatting = this.FindControl<ScrollViewer>("FormattingScroll")!;
+        var narrow = ClientSize.Width < 280;
+        Grid.SetRow(formatting, narrow ? 1 : 0);
+        Grid.SetColumnSpan(formatting, narrow ? 2 : 1);
+    }
+
     protected override void OnOpened(EventArgs e)
     {
         base.OnOpened(e);
+        UpdateToolbarLayout();
 
         // A new note should be ready to type into without a click.
         this.FindControl<TextBox>("Body")?.Focus();

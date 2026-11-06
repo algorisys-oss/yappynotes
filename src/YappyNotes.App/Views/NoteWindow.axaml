@@ -417,12 +417,12 @@
             </Grid>
         </Border>
 
-        <!-- Formatting stays at the left; the mode switch stays at the right.
-             The row keeps the same height as controls appear and disappear. -->
+        <!-- Formatting shares the row with the mode switch on wide notes. On
+             narrow notes it uses the full second row so every command fits. -->
         <Grid Grid.Row="2" RowDefinitions="Auto,*">
-        <Grid Grid.Row="0" x:Name="ModeBar" ColumnDefinitions="*,Auto"
-              Height="24" Margin="4,2,6,1">
-            <ScrollViewer Grid.Column="0" Height="24"
+        <Grid Grid.Row="0" x:Name="ModeBar" ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto"
+              Margin="4,2,6,1">
+            <ScrollViewer x:Name="FormattingScroll" Grid.Column="0" Height="24"
                           HorizontalScrollBarVisibility="Hidden"
                           VerticalScrollBarVisibility="Disabled">
                 <StackPanel Orientation="Horizontal">
@@ -438,7 +438,7 @@
                     <Button x:Name="ItalicButton" Classes="format" Width="20" Content="I"
                             FontStyle="Italic" AutomationProperties.Name="Italic"
                             ToolTip.Tip="Italic (Ctrl+I)" />
-                    <ComboBox x:Name="HeadingChoice" Width="58" Height="24"
+                    <ComboBox x:Name="HeadingChoice" Width="54" Height="24"
                               FontSize="11" PlaceholderText="Style"
                               AutomationProperties.Name="Text style"
                               ToolTip.Tip="Normal text or heading level">
@@ -448,7 +448,7 @@
                         <ComboBoxItem Content="H3" />
                         <ComboBoxItem Content="H4" />
                     </ComboBox>
-                    <Button x:Name="LinkButton" Classes="format" Width="33" Content="Link"
+                    <Button x:Name="LinkButton" Classes="format" Width="32" Content="Link"
                             FontSize="11" Padding="2,1"
                             AutomationProperties.Name="Insert or edit link"
                             ToolTip.Tip="Insert or edit link" />
@@ -471,13 +471,8 @@
             </StackPanel>
         </Grid>
 
-        <!-- The note at rest: its Markdown drawn formatted. A press on it either
-             does something (a box, a link) or opens the editor below with the
-             caret where the press landed. -->
-        <!-- A press on a line is answered by the formatted note; a press anywhere
-             else on this paper - below a short note, in the padding - reaches the
-             scroll viewer and opens the editor at the end. Transparent rather than
-             unset, or those presses would fall through to nothing. -->
+        <!-- In Preview, dragging selects text, and a click on a link or task acts
+             on it. A click on ordinary text or empty paper stays in Preview. -->
         <ScrollViewer Grid.Row="1"
                       x:Name="FormattedScroll"
                       IsVisible="{Binding !ShowsEditor}"

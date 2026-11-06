@@ -8,6 +8,7 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using Microsoft.Extensions.Time.Testing;
 using YappyNotes.App.Views;
 using YappyNotes.Core;
@@ -215,6 +216,29 @@ public class FormattedNoteWindowTests
         Assert.True(bar.Bounds.Width < window.ClientSize.Width);
         Assert.True(preview.Viewport.Height > 0);
         Assert.True(header.Bounds.Width > bar.Bounds.Width);
+    }
+
+    [AvaloniaFact]
+    public void Toolbar_AtMinimumWidth_KeepsLinkInsideTheVisibleBarInBothModes()
+    {
+        var window = OpenWith("milk");
+        window.Width = 180;
+        window.Height = 140;
+        Dispatcher.UIThread.RunJobs();
+
+        AssertLinkFits();
+        Click(window, window.FindControl<ToggleButton>("EditModeButton")!);
+        AssertLinkFits();
+
+        void AssertLinkFits()
+        {
+            var link = window.FindControl<Button>("LinkButton")!;
+            var scroll = link.GetVisualAncestors().OfType<ScrollViewer>().First();
+            var right = link.TranslatePoint(new Point(link.Bounds.Width, 0), scroll)!.Value.X;
+            Assert.True(link.IsEffectivelyVisible);
+            Assert.True(right <= scroll.Bounds.Width + 0.5,
+                $"Link ends at {right}px, beyond the visible {scroll.Bounds.Width}px formatting bar");
+        }
     }
 
     [AvaloniaFact]
