@@ -41,6 +41,12 @@ public class NoteMarkdownInlineTests
     }
 
     [Fact]
+    public void Parse_TripleAsterisks_MakeTheirTextBoldAndItalic()
+    {
+        Assert.Equal([("milk", RunStyle.Bold | RunStyle.Italic)], Styled("***milk***"));
+    }
+
+    [Fact]
     public void Parse_Backticks_MakeCode()
     {
         Assert.Equal(

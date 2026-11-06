@@ -28,13 +28,15 @@ public class FormattedNoteWindowTests
 {
     private readonly FakeTimeProvider _clock = new(new DateTimeOffset(2026, 9, 17, 12, 0, 0, TimeSpan.Zero));
     private readonly InMemoryNoteRepository _repository = new();
+    private readonly CountingNoteRepository _counting;
     private readonly NoteService _notes;
     private readonly AutoSaveService _autoSave;
     private readonly FakeLinkLauncher _links = new();
 
     public FormattedNoteWindowTests()
     {
-        _notes = new NoteService(_repository, _clock);
+        _counting = new CountingNoteRepository(_repository);
+        _notes = new NoteService(_counting, _clock);
         _autoSave = new AutoSaveService(_notes, _clock, TimeSpan.FromMilliseconds(750));
     }
 
@@ -258,7 +260,7 @@ public class FormattedNoteWindowTests
     }
 
     [AvaloniaFact]
-    public void ModeButtons_AfterPreview_ClickingTextStillOpensTheEditorAtThatText()
+    public void ModeButtons_AfterPreview_ClickingTextKeepsPreviewUntilEditIsChosen()
     {
         const string content = "buy **cold** milk";
         var window = OpenWith(content);
@@ -267,8 +269,13 @@ public class FormattedNoteWindowTests
 
         Press(window, Line(window, 0), "buy co".Length);
 
+        Assert.True(ShowsFormatted(window));
+        Assert.False(NoteOf(window).IsEditing);
+
+        Click(window, window.FindControl<ToggleButton>("EditModeButton")!);
+
         Assert.True(Editor(window).IsFocused);
-        Assert.Equal(content.IndexOf("ld", StringComparison.Ordinal), Editor(window).CaretIndex);
+        Assert.True(NoteOf(window).IsEditing);
     }
 
     [AvaloniaFact]
@@ -670,19 +677,200 @@ public class FormattedNoteWindowTests
     }
 
     [AvaloniaFact]
-    public void Toolbar_WhenSwitchingModes_FollowsEditWithoutChangingContent()
+    public void Toolbar_WhenSwitchingModes_OffersPreviewFormattingWithoutChangingContent()
     {
         var window = OpenWith("milk");
         Click(window, window.FindControl<ToggleButton>("EditModeButton")!);
         Assert.True(window.FindControl<Button>("BoldButton")!.IsEffectivelyVisible);
 
         Click(window, window.FindControl<ToggleButton>("PreviewModeButton")!);
-        Assert.False(window.FindControl<Button>("BoldButton")!.IsEffectivelyVisible);
+        Assert.True(window.FindControl<Button>("BoldButton")!.IsEffectivelyVisible);
+        Assert.False(window.FindControl<Button>("BoldButton")!.IsEnabled);
 
         Click(window, window.FindControl<ToggleButton>("EditModeButton")!);
 
         Assert.True(window.FindControl<Button>("BoldButton")!.IsEffectivelyVisible);
         Assert.Equal("milk", NoteOf(window).Content);
+    }
+
+    [AvaloniaFact]
+    public async Task PreviewToolbar_AfterDraggingAndClickingBold_RedrawsTheSelectedTextInOneSave()
+    {
+        var window = OpenWith("read docs");
+        var before = _counting.Updates;
+        Drag(window, Line(window, 0), 5, Line(window, 0), 8);
+        var bold = window.FindControl<Button>("BoldButton")!;
+        Assert.True(bold.IsEnabled);
+
+        Click(window, bold);
+        _clock.Advance(TimeSpan.FromMilliseconds(750));
+        await _autoSave.WhenIdleAsync();
+
+        Assert.Equal("read **docs**", NoteOf(window).Content);
+        Assert.Equal("docs", NoteOf(window).PreviewTextSelection!.VisibleText(NoteOf(window).Content));
+        Assert.Equal("docs", string.Concat(Line(window, 0).Inlines!.OfType<Run>()
+            .Where(run => run.Background is not null).Select(run => run.Text)));
+        Assert.True(ShowsFormatted(window));
+        Assert.False(NoteOf(window).IsEditing);
+        Assert.Equal(before + 1, _counting.Updates);
+    }
+
+    [AvaloniaFact]
+    public void PreviewToolbar_WhenDragIncludesSpaces_KeepsBoldEnabledAndTheWholeSelection()
+    {
+        var window = OpenWith("read docs now");
+        Drag(window, Line(window, 0), 4, Line(window, 0), 9);
+        var bold = window.FindControl<Button>("BoldButton")!;
+
+        Assert.Equal(" docs ", NoteOf(window).PreviewTextSelection!.VisibleText(NoteOf(window).Content));
+        Assert.True(bold.IsEnabled);
+
+        Click(window, bold);
+
+        Assert.Equal("read **docs** now", NoteOf(window).Content);
+        Assert.Equal(" docs ", NoteOf(window).PreviewTextSelection!.VisibleText(NoteOf(window).Content));
+        Assert.True(ShowsFormatted(window));
+    }
+
+    [AvaloniaFact]
+    public void PreviewToolbar_OnAWrappedParagraphAfterFormattedBlocks_EnablesAllApplicableCommands()
+    {
+        var paragraph = string.Join(' ', Enumerable.Repeat("teste", 80));
+        var window = OpenWith("# Title\n\n**Intro**\n\n" + paragraph);
+        window.Width = 540;
+        Dispatcher.UIThread.RunJobs();
+        var line = Line(window, NoteOf(window).Lines.Count - 1);
+
+        Drag(window, line, 77, line, 107);
+
+        Assert.NotNull(NoteOf(window).PreviewTextSelection);
+        Assert.True(window.FindControl<Button>("BoldButton")!.IsEnabled);
+        Assert.True(window.FindControl<Button>("ItalicButton")!.IsEnabled);
+        Assert.True(window.FindControl<ComboBox>("HeadingChoice")!.IsEnabled);
+        Assert.True(window.FindControl<Button>("LinkButton")!.IsEnabled);
+    }
+
+    [AvaloniaFact]
+    public void PreviewToolbar_ItalicOnBoldText_RendersBothStylesAndKeepsTheHighlight()
+    {
+        var window = OpenWith("**milk**");
+        Drag(window, Line(window, 0), 0, Line(window, 0), 3);
+
+        Click(window, window.FindControl<Button>("ItalicButton")!);
+
+        Assert.Equal("***milk***", NoteOf(window).Content);
+        var selected = Assert.Single(Line(window, 0).Inlines!.OfType<Run>(),
+            run => run.Background is not null);
+        Assert.Equal("milk", selected.Text);
+        Assert.Equal(FontWeight.Bold, selected.FontWeight);
+        Assert.Equal(FontStyle.Italic, selected.FontStyle);
+        Assert.True(ShowsFormatted(window));
+    }
+
+    [AvaloniaFact]
+    public void PreviewToolbar_HeadingAcrossTwoLines_StylesBothAndKeepsTheirHighlight()
+    {
+        var window = OpenWith("one\ntwo");
+        Drag(window, Line(window, 0), 0, Line(window, 1), 2);
+        var choice = window.FindControl<ComboBox>("HeadingChoice")!;
+        Assert.True(choice.IsEnabled);
+
+        choice.SelectedIndex = 2;
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal("## one\n## two", NoteOf(window).Content);
+        Assert.Equal("one\ntwo", NoteOf(window).PreviewTextSelection!.VisibleText(NoteOf(window).Content));
+        Assert.Equal("one", string.Concat(Line(window, 0).Inlines!.OfType<Run>()
+            .Where(run => run.Background is not null).Select(run => run.Text)));
+        Assert.True(ShowsFormatted(window));
+    }
+
+    [AvaloniaFact]
+    public void PreviewToolbar_NormalStyle_RemovesAnExistingHeadingPrefix()
+    {
+        var window = OpenWith("## milk");
+        Drag(window, Line(window, 0), 0, Line(window, 0), 3);
+
+        window.FindControl<ComboBox>("HeadingChoice")!.SelectedIndex = 0;
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal("milk", NoteOf(window).Content);
+        Assert.Equal("milk", NoteOf(window).PreviewTextSelection!.VisibleText(NoteOf(window).Content));
+        Assert.True(ShowsFormatted(window));
+    }
+
+    [AvaloniaFact]
+    public void PreviewToolbar_LinkOnSelectedText_OpensTheAddressPromptAndKeepsTheLinkClickable()
+    {
+        var window = OpenWith("read docs");
+        Drag(window, Line(window, 0), 5, Line(window, 0), 8);
+        var link = window.FindControl<Button>("LinkButton")!;
+        Assert.True(link.IsEnabled);
+
+        Click(window, link);
+        Assert.True(window.LinkEditor.IsOpen);
+        Assert.Equal("docs", window.LinkEditor.TextInput.Text);
+        window.LinkEditor.AddressInput.Text = "https://example.com";
+        window.LinkEditor.ApplyButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal("read [docs](https://example.com)", NoteOf(window).Content);
+        Assert.Equal("docs", NoteOf(window).PreviewTextSelection!.VisibleText(NoteOf(window).Content));
+        Assert.True(ShowsFormatted(window));
+        Press(window, Line(window, 0), 6);
+        Assert.Equal([new Uri("https://example.com")], _links.Opened);
+    }
+
+    [AvaloniaFact]
+    public void PreviewToolbar_CancellingLink_KeepsContentAndHighlight()
+    {
+        var window = OpenWith("read docs");
+        Drag(window, Line(window, 0), 5, Line(window, 0), 8);
+        var selected = NoteOf(window).PreviewTextSelection;
+
+        Click(window, window.FindControl<Button>("LinkButton")!);
+        window.LinkEditor.CancelButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal("read docs", NoteOf(window).Content);
+        Assert.Same(selected, NoteOf(window).PreviewTextSelection);
+        Assert.True(ShowsFormatted(window));
+    }
+
+    [AvaloniaFact]
+    public void PreviewToolbar_OnExistingLink_EditsItsAddressWithoutDuplicatingTheLabel()
+    {
+        var window = OpenWith("[docs](https://old.test)");
+        Drag(window, Line(window, 0), 0, Line(window, 0), 3);
+
+        Click(window, window.FindControl<Button>("LinkButton")!);
+        Assert.Equal("docs", window.LinkEditor.TextInput.Text);
+        Assert.Equal("https://old.test", window.LinkEditor.AddressInput.Text);
+        window.LinkEditor.AddressInput.Text = "https://new.test";
+        window.LinkEditor.ApplyButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal("[docs](https://new.test)", NoteOf(window).Content);
+        Assert.Equal("docs", NoteOf(window).PreviewTextSelection!.VisibleText(NoteOf(window).Content));
+        Press(window, Line(window, 0), 1);
+        Assert.Equal([new Uri("https://new.test")], _links.Opened);
+    }
+
+    [AvaloniaFact]
+    public void PreviewToolbar_OnTaskAndCode_LeavesTheirExistingActionsIntact()
+    {
+        var window = OpenWith("- [ ] milk\nuse `code`");
+        Drag(window, Line(window, 0), 2, Line(window, 0), 5);
+        Assert.False(window.FindControl<ComboBox>("HeadingChoice")!.IsEnabled);
+        Assert.True(window.FindControl<Button>("BoldButton")!.IsEnabled);
+        Press(window, Line(window, 0), 0);
+        Assert.Equal("- [x] milk\nuse `code`", NoteOf(window).Content);
+
+        Drag(window, Line(window, 1), 4, Line(window, 1), 7);
+
+        Assert.False(window.FindControl<Button>("BoldButton")!.IsEnabled);
+        Assert.False(window.FindControl<Button>("LinkButton")!.IsEnabled);
+        Assert.Null(NoteOf(window).PreviewTextSelection);
     }
 
     [AvaloniaFact]
@@ -858,16 +1046,32 @@ public class FormattedNoteWindowTests
     }
 
     [AvaloniaFact]
-    public void PressingAWord_OpensTheEditorWithTheCaretOnIt()
+    public void PressingAWord_ClearsTheSelectionAndKeepsPreview()
     {
         const string content = "# Today\n- buy **cold** milk";
         var window = OpenWith(content);
+        Drag(window, Line(window, 1), "• buy ".Length, Line(window, 1), "• buy cold".Length - 1);
+        Assert.NotNull(NoteOf(window).PreviewTextSelection);
 
         Press(window, Line(window, 1), "• buy co".Length);
 
-        Assert.True(Editor(window).IsEffectivelyVisible);
-        Assert.Equal(content.IndexOf("ld", StringComparison.Ordinal), Editor(window).CaretIndex);
-        Assert.True(Editor(window).IsFocused, "the editor opened without the keyboard in it");
+        Assert.True(ShowsFormatted(window));
+        Assert.False(Editor(window).IsEffectivelyVisible);
+        Assert.Null(NoteOf(window).PreviewTextSelection);
+        Assert.Equal(content, NoteOf(window).Content);
+    }
+
+    [AvaloniaFact]
+    public void PressingBlankPaper_ClearsTheSelectionAndKeepsPreview()
+    {
+        var window = OpenWith("milk bread");
+        Drag(window, Line(window, 0), 0, Line(window, 0), 3);
+        Assert.NotNull(NoteOf(window).PreviewTextSelection);
+
+        Click(window, window.FindControl<ScrollViewer>("FormattedScroll")!);
+
+        Assert.True(ShowsFormatted(window));
+        Assert.Null(NoteOf(window).PreviewTextSelection);
     }
 
     [AvaloniaFact]
@@ -1059,7 +1263,7 @@ public class FormattedNoteWindowTests
     }
 
     [AvaloniaFact]
-    public void PressingBelowTheText_EditsAtTheEnd()
+    public void PressingBelowTheText_KeepsPreview()
     {
         var window = OpenWith("milk");
         var paper = window.FindControl<ScrollViewer>("FormattedScroll")!;
@@ -1071,8 +1275,8 @@ public class FormattedNoteWindowTests
         window.MouseUp(below, MouseButton.Left);
         Dispatcher.UIThread.RunJobs();
 
-        Assert.True(Editor(window).IsEffectivelyVisible);
-        Assert.Equal("milk".Length, Editor(window).CaretIndex);
+        Assert.True(ShowsFormatted(window));
+        Assert.False(Editor(window).IsEffectivelyVisible);
     }
 
     /// <summary>
@@ -1092,7 +1296,8 @@ public class FormattedNoteWindowTests
     public void Editor_LosingTheKeyboard_ShowsTheNoteFormattedAgain()
     {
         var window = OpenWith("milk");
-        Press(window, Line(window, 0), 1);
+        Click(window, window.FindControl<ToggleButton>("EditModeButton")!);
+        Assert.True(Editor(window).IsEffectivelyVisible);
 
         window.FindControl<ToggleButton>("PinButton")!.Focus();
         Dispatcher.UIThread.RunJobs();
@@ -1109,7 +1314,7 @@ public class FormattedNoteWindowTests
     public void Editor_OpeningItsOwnMenu_KeepsEditing()
     {
         var window = OpenWith("milk");
-        Press(window, Line(window, 0), 1);
+        Click(window, window.FindControl<ToggleButton>("EditModeButton")!);
         var editor = Editor(window);
 
         // A real right-click, not ShowAt: only the click moves the keyboard into the
@@ -1127,7 +1332,7 @@ public class FormattedNoteWindowTests
     public void Escape_WhileEditing_ShowsTheNoteFormattedRatherThanClosingIt()
     {
         var window = OpenWith("milk");
-        Press(window, Line(window, 0), 1);
+        Click(window, window.FindControl<ToggleButton>("EditModeButton")!);
 
         window.KeyPress(Key.Escape, RawInputModifiers.None, PhysicalKey.Escape, null);
         Dispatcher.UIThread.RunJobs();

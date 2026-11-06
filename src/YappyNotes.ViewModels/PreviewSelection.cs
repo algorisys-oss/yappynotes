@@ -28,6 +28,34 @@ public sealed class PreviewSelection
     /// <summary>Zero-based indices of source blocks containing selected text.</summary>
     public IReadOnlyList<int> Blocks { get; }
 
+    /// <summary>The characters highlighted on screen, without Markdown markers.</summary>
+    public string VisibleText(string content) => TextInRange(content, Start, End).Text;
+
+    /// <summary>
+    /// Restore a selection after a formatting edit has inserted hidden syntax
+    /// between its two ends. Pointer-created selections remain stricter through
+    /// <see cref="TryCreate"/>; this only accepts the same visible text as before.
+    /// </summary>
+    public static PreviewSelection? Restore(string content, int anchor, int focus, string expectedText)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        ArgumentNullException.ThrowIfNull(expectedText);
+        if (anchor < 0 || focus < 0 || anchor > content.Length || focus > content.Length
+            || anchor == focus || !IsTextBoundary(content, anchor) || !IsTextBoundary(content, focus))
+        {
+            return null;
+        }
+
+        var (text, blocks) = TextInRange(content, Math.Min(anchor, focus), Math.Max(anchor, focus));
+        if (text.Length == 0 || text != expectedText
+            || blocks.Where((block, index) => index > 0 && block != blocks[index - 1] + 1).Any())
+        {
+            return null;
+        }
+
+        return new PreviewSelection(anchor, focus, Array.AsReadOnly(blocks.ToArray()));
+    }
+
     /// <summary>Maps boundaries in the rendered lines to a safe source interval.</summary>
     public static PreviewSelection? FromRendered(string content, IReadOnlyList<NoteLine> lines,
         int anchorLine, int anchorBoundary, int focusLine, int focusBoundary)
@@ -138,4 +166,37 @@ public sealed class PreviewSelection
     private static bool IsTextBoundary(string content, int index)
         => index == 0 || index == content.Length
             || !char.IsHighSurrogate(content[index - 1]) || !char.IsLowSurrogate(content[index]);
+
+    private static (string Text, List<int> Blocks) TextInRange(string content, int start, int end)
+    {
+        var parts = new List<string>();
+        var selectedBlocks = new List<int>();
+        var blocks = NoteMarkdown.Parse(content);
+        for (var i = 0; i < blocks.Count; i++)
+        {
+            var line = new System.Text.StringBuilder();
+            foreach (var run in blocks[i].Runs)
+            {
+                if (run.Style.HasFlag(RunStyle.Code))
+                {
+                    continue;
+                }
+
+                var from = Math.Max(start, run.SourceStart);
+                var through = Math.Min(end, run.SourceStart + run.Text.Length);
+                if (from < through)
+                {
+                    line.Append(run.Text, from - run.SourceStart, through - from);
+                }
+            }
+
+            if (line.Length > 0)
+            {
+                parts.Add(line.ToString());
+                selectedBlocks.Add(i);
+            }
+        }
+
+        return (string.Join("\n", parts), selectedBlocks);
+    }
 }

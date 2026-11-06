@@ -178,70 +178,42 @@ public class NoteFormattingTests
         Assert.False(note.IsEditing);
     }
 
-    /// <summary>
-    /// The plan named this as what would be noticed at once: clicking a word in the
-    /// formatted note has to put the caret on that word in the Markdown, not at the
-    /// start of the note.
-    /// </summary>
     [Fact]
-    public async Task PressAsync_OnFormattedText_EditsWithTheCaretOnThatCharacter()
+    public async Task PressAsync_OnFormattedText_KeepsPreviewAndClearsTheSelection()
     {
-        const string content = "# Today\n- buy **cold** milk";
+        const string content = "milk bread";
         var note = await NoteSayingAsync(content);
+        note.SelectPreviewText(0, 0, 0, 4);
 
-        // "• buy co|ld" - the 'l' of cold, which is drawn after the marker and
-        // without the asterisks.
-        await note.PressAsync(note.Lines[1], renderedIndex: "• buy co".Length);
+        await note.PressAsync(note.Lines[0], renderedIndex: 6);
 
-        Assert.True(note.IsEditing);
-        Assert.Equal(content.IndexOf("ld", StringComparison.Ordinal), note.EditCaret);
-    }
-
-    /// <summary>
-    /// As in any text box: pressing the right half of a letter puts the caret after
-    /// it, not before.
-    /// </summary>
-    [Fact]
-    public async Task PressAsync_OnTheTrailingHalfOfACharacter_PutsTheCaretAfterIt()
-    {
-        const string content = "**cold** milk";
-        var note = await NoteSayingAsync(content);
-
-        await note.PressAsync(note.Lines[0], renderedIndex: "col".Length, trailing: true);
-
-        Assert.Equal(content.IndexOf('d') + 1, note.EditCaret);
+        Assert.False(note.IsEditing);
+        Assert.Null(note.PreviewTextSelection);
+        Assert.Equal(content, note.Content);
     }
 
     [Fact]
-    public async Task PressAsync_OnTheTrailingHalfOfATasksBox_StillTicksIt()
-    {
-        var note = await NoteSayingAsync("- [ ] milk");
-
-        await note.PressAsync(note.Lines[0], renderedIndex: 0, trailing: true);
-
-        Assert.Equal("- [x] milk", note.Content);
-    }
-
-    [Fact]
-    public async Task PressAsync_OnABulletsDot_EditsFromTheStartOfItsText()
+    public async Task PressAsync_OnABulletsDot_KeepsPreview()
     {
         const string content = "- milk";
         var note = await NoteSayingAsync(content);
 
         await note.PressAsync(note.Lines[0], renderedIndex: 0);
 
-        Assert.Equal(content.IndexOf('m'), note.EditCaret);
+        Assert.False(note.ShowsEditor);
+        Assert.Equal(content, note.Content);
     }
 
     [Fact]
-    public async Task PressAsync_PastTheEndOfALine_EditsAtTheEndOfThatLine()
+    public async Task PressAsync_PastTheEndOfALine_KeepsPreview()
     {
         const string content = "milk\nbread";
         var note = await NoteSayingAsync(content);
 
         await note.PressAsync(note.Lines[0], renderedIndex: 40);
 
-        Assert.Equal("milk".Length, note.EditCaret);
+        Assert.False(note.ShowsEditor);
+        Assert.Equal(content, note.Content);
     }
 
     [Fact]
@@ -288,7 +260,7 @@ public class NoteFormattingTests
         var note = await NoteSayingAsync("milk");
         var writesBefore = _counting.Updates;
 
-        await note.PressAsync(note.Lines[0], renderedIndex: 1);
+        note.ShowEdit();
         note.EndEditing();
         await SettleAsync();
 

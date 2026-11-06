@@ -425,10 +425,12 @@
             <ScrollViewer Grid.Column="0" Height="24"
                           HorizontalScrollBarVisibility="Hidden"
                           VerticalScrollBarVisibility="Disabled">
-                <StackPanel Orientation="Horizontal" IsVisible="{Binding ShowsEditor}">
+                <StackPanel Orientation="Horizontal">
                     <Button x:Name="UndoButton" Classes="format" Width="20" Content="&#x21B6;"
+                            IsVisible="{Binding ShowsEditor}"
                             AutomationProperties.Name="Undo" ToolTip.Tip="Undo (Ctrl+Z)" />
                     <Button x:Name="RedoButton" Classes="format" Width="20" Content="&#x21B7;"
+                            IsVisible="{Binding ShowsEditor}"
                             AutomationProperties.Name="Redo" ToolTip.Tip="Redo (Ctrl+Y)" />
                     <Button x:Name="BoldButton" Classes="format" Width="20" Content="B"
                             FontWeight="Bold" AutomationProperties.Name="Bold"

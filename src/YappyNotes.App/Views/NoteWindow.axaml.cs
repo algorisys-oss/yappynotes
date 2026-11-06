@@ -52,13 +52,14 @@ public partial class NoteWindow : Window
         var formatted = this.FindControl<FormattedNote>("Formatted");
         if (formatted is not null)
         {
-            formatted.LinePressed += (_, e) => _ = _note?.PressAsync(e.Line, e.DrawnIndex, e.Trailing);
+            formatted.LinePressed += (_, e) => _ = _note?.PressAsync(e.Line, e.DrawnIndex);
             formatted.SelectionDragged += (_, e) => _note?.SelectPreviewText(
                 e.AnchorLine, e.AnchorBoundary, e.FocusLine, e.FocusBoundary);
             formatted.SelectionCleared += (_, _) => _note?.ClearPreviewTextSelection();
         }
 
-        // Presses on the paper around the text: a line would have handled its own.
+        // A click on empty paper clears the Preview selection without entering Edit.
+        // Text clicks are handled by FormattedNote; links and tasks keep their actions.
         this.FindControl<ScrollViewer>("FormattedScroll")?.AddHandler(
             PointerPressedEvent,
             (_, e) =>
@@ -66,7 +67,7 @@ public partial class NoteWindow : Window
                 if (e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
                 {
                     e.Handled = true;
-                    _note?.BeginEditingAtEnd();
+                    _note?.ClearPreviewTextSelection();
                 }
             });
 
@@ -412,6 +413,14 @@ public partial class NoteWindow : Window
 
     private void ApplyToolbarEmphasis(Emphasis emphasis)
     {
+        if (_note is { ShowsEditor: false } preview)
+        {
+            preview.TogglePreviewEmphasis(emphasis);
+            _toolbarSelection = null;
+            _keepEditorOpen = false;
+            return;
+        }
+
         if (_note is not { ShowsEditor: true } note || this.FindControl<TextBox>("Body") is not { } body)
         {
             return;
@@ -435,6 +444,15 @@ public partial class NoteWindow : Window
     {
         var choice = this.FindControl<ComboBox>("HeadingChoice")!;
         var level = choice.SelectedIndex;
+        if (level >= 0 && _note is { ShowsEditor: false } preview)
+        {
+            preview.SetPreviewHeading(level);
+            _toolbarSelection = null;
+            choice.SelectedIndex = -1;
+            _keepEditorOpen = false;
+            return;
+        }
+
         if (level < 0 || _note is not { ShowsEditor: true } note
             || this.FindControl<TextBox>("Body") is not { } body)
         {
@@ -458,6 +476,22 @@ public partial class NoteWindow : Window
 
     private async void OnLinkClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
+        if (_note is { ShowsEditor: false } preview)
+        {
+            _keepEditorOpen = true;
+            try
+            {
+                await preview.EditPreviewLinkAsync();
+            }
+            finally
+            {
+                _toolbarSelection = null;
+                _keepEditorOpen = false;
+            }
+
+            return;
+        }
+
         if (_note is not { ShowsEditor: true } note || this.FindControl<TextBox>("Body") is not { } body)
         {
             return;
@@ -521,12 +555,13 @@ public partial class NoteWindow : Window
         var content = _note?.Content ?? string.Empty;
         this.FindControl<Button>("UndoButton")!.IsEnabled = editing && body?.CanUndo == true;
         this.FindControl<Button>("RedoButton")!.IsEnabled = editing && body?.CanRedo == true;
-        this.FindControl<Button>("BoldButton")!.IsEnabled = editing;
-        this.FindControl<Button>("ItalicButton")!.IsEnabled = editing;
+        this.FindControl<Button>("BoldButton")!.IsEnabled = editing || _note?.CanPreviewBold == true;
+        this.FindControl<Button>("ItalicButton")!.IsEnabled = editing || _note?.CanPreviewItalic == true;
         this.FindControl<ComboBox>("HeadingChoice")!.IsEnabled = editing
-            && MarkdownHeading.CanSetLevel(content, Math.Min(selection.Item1, selection.Item2),
-                Math.Max(selection.Item1, selection.Item2));
-        this.FindControl<Button>("LinkButton")!.IsEnabled = editing;
+            ? MarkdownHeading.CanSetLevel(content, Math.Min(selection.Item1, selection.Item2),
+                Math.Max(selection.Item1, selection.Item2))
+            : _note?.CanPreviewHeading == true;
+        this.FindControl<Button>("LinkButton")!.IsEnabled = editing || _note?.CanPreviewLink == true;
     }
 
     protected override void OnOpened(EventArgs e)
@@ -593,7 +628,8 @@ public partial class NoteWindow : Window
         }
 
         if (e.PropertyName is nameof(NoteViewModel.ShowsEditor)
-            or nameof(NoteViewModel.IsEditing) or nameof(NoteViewModel.Content))
+            or nameof(NoteViewModel.IsEditing) or nameof(NoteViewModel.Content)
+            or nameof(NoteViewModel.PreviewTextSelection))
         {
             UpdateToolbarAvailability();
         }
@@ -746,7 +782,7 @@ public partial class NoteWindow : Window
         var formatted = this.FindControl<FormattedNote>("Formatted");
         if (formatted is not null)
         {
-            formatted.LinePressed += (_, e) => _ = _note?.PressAsync(e.Line, e.DrawnIndex, e.Trailing);
+            formatted.LinePressed += (_, e) => _ = _note?.PressAsync(e.Line, e.DrawnIndex);
         }
 
         // Presses on the paper around the text: a line would have handled its own.

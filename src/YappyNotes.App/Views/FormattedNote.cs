@@ -11,7 +11,7 @@ namespace YappyNotes.App.Views;
 
 /// <summary>
 /// A note's Markdown, drawn formatted: one wrapping line of text per line of the
-/// note.
+/// note. Dragging selects text; clicking it stays in Preview.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -54,7 +54,7 @@ public sealed class FormattedNote : StackPanel
     private Press? _press;
 
     private sealed record Press(IPointer Pointer, IReadOnlyList<NoteLine> Lines, int Line, int Boundary,
-        NoteLine ClickLine, int ClickIndex, bool ClickTrailing, Point Position)
+        NoteLine ClickLine, int ClickIndex, Point Position)
     {
         public bool Dragged { get; set; }
     }
@@ -137,7 +137,7 @@ public sealed class FormattedNote : StackPanel
         if (Hit(position, clampToNearestLine: false) is { } hit && Lines is { } lines)
         {
             _press = new Press(e.Pointer, lines, hit.LineIndex, hit.Boundary,
-                lines[hit.LineIndex], hit.ClickIndex, hit.Trailing, position);
+                lines[hit.LineIndex], hit.ClickIndex, position);
             e.Pointer.Capture(this);
             e.Handled = true;
         }
@@ -189,7 +189,7 @@ public sealed class FormattedNote : StackPanel
         else
         {
             SelectionCleared?.Invoke(this, EventArgs.Empty);
-            LinePressed?.Invoke(this, new LinePressedEventArgs(press.ClickLine, press.ClickIndex, press.ClickTrailing));
+            LinePressed?.Invoke(this, new LinePressedEventArgs(press.ClickLine, press.ClickIndex));
         }
     }
 
@@ -208,7 +208,7 @@ public sealed class FormattedNote : StackPanel
         }
     }
 
-    private (int LineIndex, int Boundary, int ClickIndex, bool Trailing)? Hit(Point position, bool clampToNearestLine)
+    private (int LineIndex, int Boundary, int ClickIndex)? Hit(Point position, bool clampToNearestLine)
     {
         var lines = Lines;
         if (lines is null)
@@ -265,7 +265,7 @@ public sealed class FormattedNote : StackPanel
         var length = DrawnLength(chosen);
         var clickIndex = hit.IsInside ? hit.TextPosition : length;
         var boundary = Math.Clamp(hit.TextPosition + (hit.IsTrailing ? 1 : 0), 0, length);
-        return (lineIndex, boundary, clickIndex, hit.IsInside && hit.IsTrailing);
+        return (lineIndex, boundary, clickIndex);
     }
 
     private static int DrawnLength(NoteLine line) => line.Marker.Length + line.Block.Runs.Sum(run => run.Text.Length);
@@ -412,13 +412,12 @@ public sealed class FormattedNote : StackPanel
     };
 }
 
-public sealed class LinePressedEventArgs(NoteLine line, int drawnIndex, bool trailing) : EventArgs
+public sealed class LinePressedEventArgs(NoteLine line, int drawnIndex) : EventArgs
 {
     public NoteLine Line { get; } = line;
 
     public int DrawnIndex { get; } = drawnIndex;
 
-    public bool Trailing { get; } = trailing;
 }
 
 public sealed class RenderedSelectionEventArgs(int anchorLine, int anchorBoundary, int focusLine, int focusBoundary) : EventArgs

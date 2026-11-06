@@ -257,7 +257,12 @@ public static class NoteMarkdown
             if (c is '*' or '_' && TryEmphasis(content, i, start, end, out var width, out var closer))
             {
                 Plain(content, plainStart, i, style, runs);
-                var emphasis = width == 2 ? RunStyle.Bold : RunStyle.Italic;
+                var emphasis = width switch
+                {
+                    3 => RunStyle.Bold | RunStyle.Italic,
+                    2 => RunStyle.Bold,
+                    _ => RunStyle.Italic,
+                };
                 ParseInlines(content, i + width, closer, style | emphasis, runs, dates);
                 i = closer + width;
                 plainStart = i;
@@ -370,7 +375,9 @@ public static class NoteMarkdown
     private static bool TryEmphasis(string content, int open, int lineStart, int end, out int width, out int close)
     {
         var marker = content[open];
-        width = open + 1 < end && content[open + 1] == marker ? 2 : 1;
+        width = open + 2 < end && content[open + 1] == marker && content[open + 2] == marker
+            ? 3
+            : open + 1 < end && content[open + 1] == marker ? 2 : 1;
         close = -1;
 
         var textStart = open + width;
