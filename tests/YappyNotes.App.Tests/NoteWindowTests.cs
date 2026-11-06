@@ -51,6 +51,30 @@ public class NoteWindowTests
     }
 
     [AvaloniaFact]
+    public async Task Header_CloseIsTheLastActionAndKeepsTheNoteAvailable()
+    {
+        var note = await _notes.CreateAsync();
+        await _windows.ShowNoteAsync(note.Id);
+        var window = _windows.WindowFor(note.Id)!;
+        Dispatcher.UIThread.RunJobs();
+
+        var close = window.FindControl<Button>("CloseButton")!;
+        var color = window.FindControl<Button>("ColorButton")!;
+        var pin = window.FindControl<ToggleButton>("PinButton")!;
+        var archive = window.FindControl<Button>("ArchiveButton")!;
+        Assert.True(color.Bounds.Left < pin.Bounds.Left
+            && pin.Bounds.Left < archive.Bounds.Left
+            && archive.Bounds.Left < close.Bounds.Left);
+        Assert.Same(_windows.ViewModelFor(note.Id)!.ArchiveCommand, archive.Command);
+
+        Click(window, close);
+        await _autoSave.WhenIdleAsync();
+
+        Assert.Empty(_windows.OpenNotes);
+        Assert.False((await _repository.GetByIdAsync(note.Id))!.IsArchived);
+    }
+
+    [AvaloniaFact]
     public async Task ModeButtons_WithoutTyping_DoNotScheduleAnAutosave()
     {
         var viewModel = NewViewModel(note => note.Content = "milk");

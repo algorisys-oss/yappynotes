@@ -240,31 +240,40 @@
                     x:Name="PinButton"
                     IsChecked="{Binding IsAlwaysOnTop}"
                     ToolTip.Tip="Keep this note on top of other windows (Ctrl+P)"
-                    Content="&#x25C9;"
-                    Foreground="#555"
                     Background="Transparent"
                     BorderThickness="0"
-                    Padding="8,4" />
+                    Padding="8,4">
+                <Path Data="M 4,1 H 10 V 2 L 9,3 V 6 C 9,7.1 10,8 11,8 V 9 H 3 V 8 C 4,8 5,7.1 5,6 V 3 L 4,2 Z M 6.7,9 H 7.3 V 13.4 L 7,14.5 Z"
+                      Width="14" Height="14"
+                      Fill="#555" Stretch="Uniform" />
+            </ToggleButton>
 
+            <!-- Two overlapping folders distinguish archiving from closing. -->
             <Button Grid.Column="3"
                     x:Name="ArchiveButton"
                     Command="{Binding ArchiveCommand}"
                     ToolTip.Tip="Archive this note (it can be restored)"
-                    Content="&#x2715;"
-                    Foreground="#555"
                     Background="Transparent"
                     BorderThickness="0"
-                    Padding="8,4" />
+                    Padding="8,4">
+                <Path Data="M 1,5 V 2 H 5 L 6.3,3.5 H 11 V 5.5 M 3,6 H 6.8 L 8,7.5 H 13 V 13 H 3 Z"
+                      Width="14" Height="14"
+                      Stroke="#555" StrokeThickness="1.2" Stretch="Uniform" />
+            </Button>
 
+            <!-- Closing keeps the note available in the manager. Its X is the
+                 rightmost action; the folders beside it archive the note. -->
             <Button Grid.Column="4"
                     x:Name="CloseButton"
                     Click="OnCloseClicked"
                     ToolTip.Tip="Close the window, keep the note (Ctrl+W or Esc)"
-                    Content="&#x2013;"
-                    Foreground="#555"
                     Background="Transparent"
                     BorderThickness="0"
-                    Padding="8,4" />
+                    Padding="8,4">
+                <Path Data="M 3,3 L 11,11 M 11,3 L 3,11"
+                      Width="14" Height="14"
+                      Stroke="#555" StrokeThickness="1.4" />
+            </Button>
         </Grid>
 
         <!-- The bar stays to the count and its transport. Everything you set
