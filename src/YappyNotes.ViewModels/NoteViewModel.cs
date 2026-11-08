@@ -31,6 +31,8 @@ public sealed partial class NoteViewModel : ObservableObject
     private readonly TimeProvider _timeProvider;
     private readonly IUiDispatcher _ui;
     private readonly ILinkLauncher _links;
+    private ILinkEditor? _linkEditor;
+    private PreviewSelection? _previewTextSelection;
 
     /// <param name="timeProvider">
     /// Used by the timer, if the note has one. Defaults to the system clock so
@@ -62,6 +64,7 @@ public sealed partial class NoteViewModel : ObservableObject
         _timeProvider = timeProvider ?? TimeProvider.System;
         _ui = ui ?? new ImmediateUiDispatcher();
         _links = links ?? new NoLinkLauncher();
+        EditCaret = note.Content.Length;
 
         AttachTimer();
         ScanForLinks();
@@ -81,6 +84,11 @@ public sealed partial class NoteViewModel : ObservableObject
         get => _note.Content;
         set
         {
+            if (_note.Content != value)
+            {
+                ClearPreviewTextSelection();
+            }
+
             // An empty note shows the editor because there is nothing to format, not
             // because it is being edited. A change arriving while that editor is the
             // one showing is typing into it, and the first letter must not turn the
@@ -88,6 +96,7 @@ public sealed partial class NoteViewModel : ObservableObject
             var typedIntoEmptyEditor = ShowsEditor && !IsEditing && !string.IsNullOrEmpty(value);
 
             Set(_note.Content, value, v => _note.Content = v);
+            OnPropertyChanged(nameof(HasPreviewContent));
 
             if (typedIntoEmptyEditor)
             {
@@ -121,6 +130,56 @@ public sealed partial class NoteViewModel : ObservableObject
     /// <summary>The note's Markdown, parsed into the lines the formatted view draws.</summary>
     public IReadOnlyList<NoteLine> Lines { get; private set; } = [];
 
+    /// <summary>Safe source offsets of text currently highlighted in Preview.</summary>
+    public PreviewSelection? PreviewTextSelection => _previewTextSelection;
+
+    public bool CanPreviewBold => !ShowsEditor && _previewTextSelection is { } selection
+        && PreviewMarkdown.ToggleEmphasis(_note.Content, selection.Start, selection.End, Emphasis.Bold) is not null;
+
+    public bool CanPreviewItalic => !ShowsEditor && _previewTextSelection is { } selection
+        && PreviewMarkdown.ToggleEmphasis(_note.Content, selection.Start, selection.End, Emphasis.Italic) is not null;
+
+    public bool CanPreviewHeading => !ShowsEditor && _previewTextSelection is { } selection
+        && MarkdownHeading.CanSetLevel(_note.Content, selection.Start, selection.End);
+
+    public bool CanPreviewLink => !ShowsEditor && _previewTextSelection is { } selection
+        && MarkdownLinks.CanEdit(_note.Content, selection.Start, selection.End)
+        && MarkdownLinks.Initial(_note.Content, selection.Start, selection.End).Text
+            == selection.VisibleText(_note.Content);
+
+    /// <summary>Accept only a selection mappable to the note's current Markdown.</summary>
+    public void SelectPreviewText(int anchorLine, int anchorBoundary, int focusLine, int focusBoundary)
+    {
+        if (ShowsEditor)
+        {
+            ClearPreviewTextSelection();
+            return;
+        }
+
+        SetPreviewTextSelection(PreviewSelection.FromRendered(_note.Content, Lines,
+            anchorLine, anchorBoundary, focusLine, focusBoundary));
+    }
+
+    public void ClearPreviewTextSelection()
+    {
+        if (_previewTextSelection is null)
+        {
+            return;
+        }
+
+        SetPreviewTextSelection(null);
+    }
+
+    private void SetPreviewTextSelection(PreviewSelection? selection)
+    {
+        _previewTextSelection = selection;
+        OnPropertyChanged(nameof(PreviewTextSelection));
+        OnPropertyChanged(nameof(CanPreviewBold));
+        OnPropertyChanged(nameof(CanPreviewItalic));
+        OnPropertyChanged(nameof(CanPreviewHeading));
+        OnPropertyChanged(nameof(CanPreviewLink));
+    }
+
     /// <summary>
     /// Whether the reader is typing in the Markdown rather than looking at it
     /// formatted. How the note is being looked at, not part of the note, so it is
@@ -147,18 +206,56 @@ public sealed partial class NoteViewModel : ObservableObject
     /// </remarks>
     public bool ShowsEditor => IsEditing || (string.IsNullOrWhiteSpace(_note.Content) && !IsAddingTodo && !CanUndoClear);
 
+    /// <summary>An empty note has nothing to render in Preview.</summary>
+    public bool HasPreviewContent => !string.IsNullOrWhiteSpace(_note.Content);
+
     /// <summary>Where the caret goes when the editor opens.</summary>
     public int EditCaret { get; private set; }
 
+    /// <summary>Keep the editor's caret when it gives focus to a control inside the note.</summary>
+    public void RememberEditCaret(int caret)
+    {
+        var next = Math.Clamp(caret, 0, _note.Content.Length);
+        if (EditCaret == next)
+        {
+            return;
+        }
+
+        EditCaret = next;
+        OnPropertyChanged(nameof(EditCaret));
+    }
+
+    /// <summary>Open the Markdown source in this note, at its last known caret.</summary>
+    [RelayCommand]
+    public void ShowEdit()
+    {
+        if (IsAddingTodo)
+        {
+            StopAddingTodos();
+        }
+
+        BeginEditing(EditCaret);
+    }
+
+    /// <summary>Render the note without moving focus to another window.</summary>
+    [RelayCommand]
+    public void ShowPreview()
+    {
+        if (HasPreviewContent)
+        {
+            EndEditing();
+        }
+    }
+
     /// <summary>
-    /// A press on the formatted note. It ticks a checklist box, opens a link, or
-    /// starts editing with the caret on the character that was pressed.
+    /// A click on the formatted note. It ticks a checklist box or opens a link;
+    /// ordinary text stays in Preview so it can be selected and formatted there.
     /// </summary>
     /// <param name="renderedIndex">Which character of the drawn line was pressed.</param>
-    /// <param name="trailing">Whether the press was on that character's right half.</param>
-    public async Task PressAsync(NoteLine line, int renderedIndex, bool trailing = false)
+    public async Task PressAsync(NoteLine line, int renderedIndex)
     {
         ArgumentNullException.ThrowIfNull(line);
+        ClearPreviewTextSelection();
 
         if (line.IsCheckBoxAt(renderedIndex))
         {
@@ -172,15 +269,9 @@ public sealed partial class NoteViewModel : ObservableObject
             await _links.OpenAsync(address);
             return;
         }
-
-        // The right half of a letter puts the caret after it, as in any text box.
-        // Only over text: past the end, or over the marker, there is no letter to
-        // be after.
-        var after = trailing && line.RunAt(renderedIndex) is not null ? 1 : 0;
-        BeginEditing(line.SourceIndexAt(renderedIndex) + after);
     }
 
-    /// <summary>Starts editing with the caret after the last character - a press below the text.</summary>
+    /// <summary>Starts editing with the caret after the last character.</summary>
     public void BeginEditingAtEnd() => BeginEditing(_note.Content.Length);
 
     public void EndEditing() => SetEditing(false);
@@ -413,10 +504,135 @@ public sealed partial class NoteViewModel : ObservableObject
         return (edit.SelectionStart, edit.SelectionEnd);
     }
 
+    /// <summary>Apply emphasis to a safely mapped selection without opening Edit.</summary>
+    public bool TogglePreviewEmphasis(Emphasis emphasis)
+    {
+        if (ShowsEditor || _previewTextSelection is not { } selection
+            || PreviewMarkdown.ToggleEmphasis(_note.Content, selection.Start, selection.End, emphasis) is not { } edit)
+        {
+            return false;
+        }
+
+        return ApplyPreviewEdit(edit, selection, selection.VisibleText(_note.Content));
+    }
+
+    /// <summary>Change every safely selected paragraph or heading in Preview.</summary>
+    public bool SetPreviewHeading(int level)
+    {
+        if (!CanPreviewHeading || _previewTextSelection is not { } selection)
+        {
+            return false;
+        }
+
+        var edit = MarkdownHeading.SetLevel(_note.Content, selection.Start, selection.End, level);
+        return ApplyPreviewEdit(edit, selection, selection.VisibleText(_note.Content));
+    }
+
+    private bool ApplyPreviewEdit(MarkdownEdit edit, PreviewSelection original, string expectedText)
+    {
+        if (edit.Content == _note.Content)
+        {
+            return false;
+        }
+
+        var forward = original.Anchor <= original.Focus;
+        var anchor = forward ? edit.SelectionStart : edit.SelectionEnd;
+        var focus = forward ? edit.SelectionEnd : edit.SelectionStart;
+        var restored = PreviewSelection.Restore(edit.Content, anchor, focus, expectedText);
+        if (restored is null)
+        {
+            return false;
+        }
+
+        Content = edit.Content;
+        SetPreviewTextSelection(restored);
+        return true;
+    }
+
+    /// <summary>Apply a normal or H1–H4 style to the editor's current line.</summary>
+    public (int Start, int End) SetHeading(int selectionStart, int selectionEnd, int level)
+    {
+        if (!IsEditing)
+        {
+            return (selectionStart, selectionEnd);
+        }
+
+        var edit = MarkdownHeading.SetLevel(_note.Content, selectionStart, selectionEnd, level);
+        if (edit.Content != _note.Content)
+        {
+            Content = edit.Content;
+        }
+
+        return (edit.SelectionStart, edit.SelectionEnd);
+    }
+
+    /// <summary>Supply a window-owned prompt for links when this note is shown.</summary>
+    public void SetLinkEditor(ILinkEditor editor) => _linkEditor = editor ?? throw new ArgumentNullException(nameof(editor));
+
+    /// <summary>Turn selected text into a link whose address is ready to type.</summary>
+    public (int Start, int End) StartLinkAtSelection(int selectionStart, int selectionEnd)
+    {
+        if (!IsEditing)
+        {
+            return (selectionStart, selectionEnd);
+        }
+
+        var edit = MarkdownLinks.BeginAtSelection(_note.Content, selectionStart, selectionEnd);
+        if (edit.Content != _note.Content)
+        {
+            Content = edit.Content;
+        }
+
+        return (edit.SelectionStart, edit.SelectionEnd);
+    }
+
+    /// <summary>Ask for link details, then apply one validated Markdown edit.</summary>
+    public async Task<(int Start, int End)> EditLinkAsync(int selectionStart, int selectionEnd)
+    {
+        if (!IsEditing || _linkEditor is null)
+        {
+            return (selectionStart, selectionEnd);
+        }
+
+        var original = _note.Content;
+        var initial = MarkdownLinks.Initial(original, selectionStart, selectionEnd);
+        var answer = await _linkEditor.EditAsync(initial);
+        if (answer is null || _note.Content != original || !IsEditing)
+        {
+            return (selectionStart, selectionEnd);
+        }
+
+        var edit = MarkdownLinks.Apply(original, selectionStart, selectionEnd, answer.Text, answer.Address);
+        if (edit.Content != original)
+        {
+            Content = edit.Content;
+        }
+
+        return (edit.SelectionStart, edit.SelectionEnd);
+    }
+
+    /// <summary>Prompt for the address of text selected in Preview.</summary>
+    public async Task<bool> EditPreviewLinkAsync()
+    {
+        if (!CanPreviewLink || _linkEditor is null || _previewTextSelection is not { } selection)
+        {
+            return false;
+        }
+
+        var original = _note.Content;
+        var answer = await _linkEditor.EditAsync(MarkdownLinks.Initial(original, selection.Start, selection.End));
+        if (answer is null || _note.Content != original || ShowsEditor || _previewTextSelection != selection)
+        {
+            return false;
+        }
+
+        var edit = MarkdownLinks.Apply(original, selection.Start, selection.End, answer.Text, answer.Address);
+        return ApplyPreviewEdit(edit, selection, answer.Text);
+    }
+
     private void BeginEditing(int caret)
     {
-        EditCaret = Math.Clamp(caret, 0, _note.Content.Length);
-        OnPropertyChanged(nameof(EditCaret));
+        RememberEditCaret(caret);
         SetEditing(true);
     }
 
@@ -425,6 +641,11 @@ public sealed partial class NoteViewModel : ObservableObject
         if (IsEditing == editing)
         {
             return;
+        }
+
+        if (editing)
+        {
+            ClearPreviewTextSelection();
         }
 
         IsEditing = editing;

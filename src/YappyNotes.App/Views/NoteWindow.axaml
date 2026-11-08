@@ -117,6 +117,29 @@
             <Setter Property="HorizontalAlignment" Value="Stretch" />
             <Setter Property="HorizontalContentAlignment" Value="Left" />
         </Style>
+
+        <Style Selector="ToggleButton.mode">
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="Height" Value="24" />
+            <Setter Property="Padding" Value="6,1" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Foreground" Value="#333333" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+        <Style Selector="ToggleButton.mode:checked">
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Background" Value="#22000000" />
+        </Style>
+        <Style Selector="Button.format">
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="Height" Value="24" />
+            <Setter Property="MinWidth" Value="20" />
+            <Setter Property="Padding" Value="4,1" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
     </Window.Styles>
 
     <Border x:Name="NoteChrome" BorderThickness="1">
@@ -217,31 +240,40 @@
                     x:Name="PinButton"
                     IsChecked="{Binding IsAlwaysOnTop}"
                     ToolTip.Tip="Keep this note on top of other windows (Ctrl+P)"
-                    Content="&#x25C9;"
-                    Foreground="#555"
                     Background="Transparent"
                     BorderThickness="0"
-                    Padding="8,4" />
+                    Padding="8,4">
+                <Path Data="M 4,1 H 10 V 2 L 9,3 V 6 C 9,7.1 10,8 11,8 V 9 H 3 V 8 C 4,8 5,7.1 5,6 V 3 L 4,2 Z M 6.7,9 H 7.3 V 13.4 L 7,14.5 Z"
+                      Width="14" Height="14"
+                      Fill="#555" Stretch="Uniform" />
+            </ToggleButton>
 
+            <!-- Two overlapping folders distinguish archiving from closing. -->
             <Button Grid.Column="3"
                     x:Name="ArchiveButton"
                     Command="{Binding ArchiveCommand}"
                     ToolTip.Tip="Archive this note (it can be restored)"
-                    Content="&#x2715;"
-                    Foreground="#555"
                     Background="Transparent"
                     BorderThickness="0"
-                    Padding="8,4" />
+                    Padding="8,4">
+                <Path Data="M 1,5 V 2 H 5 L 6.3,3.5 H 11 V 5.5 M 3,6 H 6.8 L 8,7.5 H 13 V 13 H 3 Z"
+                      Width="14" Height="14"
+                      Stroke="#555" StrokeThickness="1.2" Stretch="Uniform" />
+            </Button>
 
+            <!-- Closing keeps the note available in the manager. Its X is the
+                 rightmost action; the folders beside it archive the note. -->
             <Button Grid.Column="4"
                     x:Name="CloseButton"
                     Click="OnCloseClicked"
                     ToolTip.Tip="Close the window, keep the note (Ctrl+W or Esc)"
-                    Content="&#x2013;"
-                    Foreground="#555"
                     Background="Transparent"
                     BorderThickness="0"
-                    Padding="8,4" />
+                    Padding="8,4">
+                <Path Data="M 3,3 L 11,11 M 11,3 L 3,11"
+                      Width="14" Height="14"
+                      Stroke="#555" StrokeThickness="1.4" />
+            </Button>
         </Grid>
 
         <!-- The bar stays to the count and its transport. Everything you set
@@ -394,14 +426,63 @@
             </Grid>
         </Border>
 
-        <!-- The note at rest: its Markdown drawn formatted. A press on it either
-             does something (a box, a link) or opens the editor below with the
-             caret where the press landed. -->
-        <!-- A press on a line is answered by the formatted note; a press anywhere
-             else on this paper - below a short note, in the padding - reaches the
-             scroll viewer and opens the editor at the end. Transparent rather than
-             unset, or those presses would fall through to nothing. -->
-        <ScrollViewer Grid.Row="2"
+        <!-- Formatting shares the row with the mode switch on wide notes. On
+             narrow notes it uses the full second row so every command fits. -->
+        <Grid Grid.Row="2" RowDefinitions="Auto,*">
+        <Grid Grid.Row="0" x:Name="ModeBar" ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto"
+              Margin="4,2,6,1">
+            <ScrollViewer x:Name="FormattingScroll" Grid.Column="0" Height="24"
+                          HorizontalScrollBarVisibility="Hidden"
+                          VerticalScrollBarVisibility="Disabled">
+                <StackPanel Orientation="Horizontal">
+                    <Button x:Name="UndoButton" Classes="format" Width="20" Content="&#x21B6;"
+                            IsVisible="{Binding ShowsEditor}"
+                            AutomationProperties.Name="Undo" ToolTip.Tip="Undo (Ctrl+Z)" />
+                    <Button x:Name="RedoButton" Classes="format" Width="20" Content="&#x21B7;"
+                            IsVisible="{Binding ShowsEditor}"
+                            AutomationProperties.Name="Redo" ToolTip.Tip="Redo (Ctrl+Y)" />
+                    <Button x:Name="BoldButton" Classes="format" Width="20" Content="B"
+                            FontWeight="Bold" AutomationProperties.Name="Bold"
+                            ToolTip.Tip="Bold (Ctrl+B)" />
+                    <Button x:Name="ItalicButton" Classes="format" Width="20" Content="I"
+                            FontStyle="Italic" AutomationProperties.Name="Italic"
+                            ToolTip.Tip="Italic (Ctrl+I)" />
+                    <ComboBox x:Name="HeadingChoice" Width="54" Height="24"
+                              FontSize="11" PlaceholderText="Style"
+                              AutomationProperties.Name="Text style"
+                              ToolTip.Tip="Normal text or heading level">
+                        <ComboBoxItem Content="Normal" />
+                        <ComboBoxItem Content="H1" />
+                        <ComboBoxItem Content="H2" />
+                        <ComboBoxItem Content="H3" />
+                        <ComboBoxItem Content="H4" />
+                    </ComboBox>
+                    <Button x:Name="LinkButton" Classes="format" Width="32" Content="Link"
+                            FontSize="11" Padding="2,1"
+                            AutomationProperties.Name="Insert or edit link"
+                            ToolTip.Tip="Insert or edit link" />
+                </StackPanel>
+            </ScrollViewer>
+            <StackPanel Grid.Column="1" Orientation="Horizontal">
+                <ToggleButton x:Name="EditModeButton"
+                              Classes="mode"
+                              Width="34"
+                              Content="Edit"
+                              ToolTip.Tip="Edit Markdown source"
+                              Command="{Binding ShowEditCommand}" />
+                <ToggleButton x:Name="PreviewModeButton"
+                              Classes="mode"
+                              Width="56"
+                              Content="Preview"
+                              ToolTip.Tip="Preview formatted note"
+                              IsEnabled="{Binding HasPreviewContent}"
+                              Command="{Binding ShowPreviewCommand}" />
+            </StackPanel>
+        </Grid>
+
+        <!-- In Preview, dragging selects text, and a click on a link or task acts
+             on it. A click on ordinary text or empty paper stays in Preview. -->
+        <ScrollViewer Grid.Row="1"
                       x:Name="FormattedScroll"
                       IsVisible="{Binding !ShowsEditor}"
                       Background="Transparent"
@@ -411,6 +492,7 @@
             <StackPanel VerticalAlignment="Top">
                 <views:FormattedNote x:Name="Formatted"
                                      Lines="{Binding Lines}"
+                                     Selection="{Binding PreviewTextSelection}"
                                      AddRowPosition="{Binding NewTodoPosition}"
                                      TextElement.Foreground="#1a1a1a">
                     <!-- The list's own last line: "+ Add a to-do" at rest, and a new
@@ -478,7 +560,7 @@
             </StackPanel>
         </ScrollViewer>
 
-        <TextBox Grid.Row="2"
+        <TextBox Grid.Row="1"
                  x:Name="Body"
                  IsVisible="{Binding ShowsEditor}"
                  Text="{Binding Content}"
@@ -491,6 +573,7 @@
                  Foreground="#1a1a1a"
                  Padding="8"
                  VerticalAlignment="Stretch" />
+        </Grid>
 
         <!-- While editing, the Markdown editor draws plain text and a link in it
              cannot be clicked, so the links are offered here instead. Formatted,

@@ -1,4 +1,10 @@
+using Avalonia;
+using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
+using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
+using Avalonia.Input;
+using Avalonia.Threading;
 using Microsoft.Extensions.Time.Testing;
 using YappyNotes.App.Views;
 using YappyNotes.Core;
@@ -34,6 +40,83 @@ public class NoteWindowTests
         var note = _notes.CreateAsync().GetAwaiter().GetResult();
         arrange?.Invoke(note);
         return new NoteViewModel(note, _notes, _autoSave, _windows);
+    }
+
+    private static void Click(NoteWindow window, Control control)
+    {
+        var centre = control.TranslatePoint(new Point(control.Bounds.Width / 2, control.Bounds.Height / 2), window)!.Value;
+        window.MouseDown(centre, MouseButton.Left);
+        window.MouseUp(centre, MouseButton.Left);
+        Dispatcher.UIThread.RunJobs();
+    }
+
+    [AvaloniaFact]
+    public async Task Header_CloseIsTheLastActionAndKeepsTheNoteAvailable()
+    {
+        var note = await _notes.CreateAsync();
+        await _windows.ShowNoteAsync(note.Id);
+        var window = _windows.WindowFor(note.Id)!;
+        Dispatcher.UIThread.RunJobs();
+
+        var close = window.FindControl<Button>("CloseButton")!;
+        var color = window.FindControl<Button>("ColorButton")!;
+        var pin = window.FindControl<ToggleButton>("PinButton")!;
+        var archive = window.FindControl<Button>("ArchiveButton")!;
+        Assert.True(color.Bounds.Left < pin.Bounds.Left
+            && pin.Bounds.Left < archive.Bounds.Left
+            && archive.Bounds.Left < close.Bounds.Left);
+        Assert.Same(_windows.ViewModelFor(note.Id)!.ArchiveCommand, archive.Command);
+
+        Click(window, close);
+        await _autoSave.WhenIdleAsync();
+
+        Assert.Empty(_windows.OpenNotes);
+        Assert.False((await _repository.GetByIdAsync(note.Id))!.IsArchived);
+    }
+
+    [AvaloniaFact]
+    public async Task ModeButtons_WithoutTyping_DoNotScheduleAnAutosave()
+    {
+        var viewModel = NewViewModel(note => note.Content = "milk");
+        var window = new NoteWindow(viewModel);
+        window.Show();
+        Dispatcher.UIThread.RunJobs();
+        var writesBefore = _counting.Updates;
+
+        Click(window, window.FindControl<ToggleButton>("EditModeButton")!);
+        Click(window, window.FindControl<ToggleButton>("PreviewModeButton")!);
+        _clock.Advance(Debounce * 2);
+        await _autoSave.WhenIdleAsync();
+
+        Assert.Equal("milk", viewModel.Content);
+        Assert.Equal(writesBefore, _counting.Updates);
+    }
+
+    [AvaloniaFact]
+    public async Task ModeButtons_AfterTyping_CloseStillFlushesThePendingSave()
+    {
+        var viewModel = NewViewModel(note => note.Content = "milk");
+        var window = new NoteWindow(viewModel);
+        window.Show();
+        Dispatcher.UIThread.RunJobs();
+
+        Click(window, window.FindControl<ToggleButton>("EditModeButton")!);
+        viewModel.Content = "milk and bread";
+        Click(window, window.FindControl<ToggleButton>("PreviewModeButton")!);
+        window.Close();
+        await _autoSave.WhenIdleAsync();
+
+        Assert.Equal("milk and bread", (await _repository.GetByIdAsync(viewModel.Id))!.Content);
+        Assert.False(window.IsVisible);
+    }
+
+    [AvaloniaFact]
+    public async Task NoteWindow_OnLinux_IsAvailableToWindowSwitcher()
+    {
+        var note = await _notes.CreateAsync();
+        await _windows.ShowNoteAsync(note.Id);
+
+        Assert.Equal(OperatingSystem.IsLinux(), _windows.WindowFor(note.Id)!.ShowInTaskbar);
     }
 
     [AvaloniaFact]

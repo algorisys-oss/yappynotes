@@ -47,10 +47,11 @@ closed, and the repository contract answered twice.
 > editor), and clear when done — with an undo, and a "2 of 5 done" count on the
 > note and in the manager, whose To-dos view lists every open item from every note
 > and ticks them from there; `@2026-09-20` — or `@tomorrow`, `@fri` in the add
-> field — gives an item a due date, red once it is overdue — bold, italic, `code`, and links — bare or labelled,
-> http/https/mailto only — that open where they are written. Click the text to
-> edit the Markdown, with the caret where you clicked, and Ctrl+B or Ctrl+I to
-> bold or italicise a selection; click away and it is formatted again. It is still stored as the plain text you typed.
+> field — gives an item a due date, red once it is overdue — bold, italic, `code`,
+> and links — bare or labelled, http/https/mailto only — that open where they are
+> written. Each note has Edit and Preview controls and a Markdown formatting bar.
+> Drag across text in Preview to format it there, or choose Edit to type Markdown.
+> The note is still stored as plain text.
 >
 > The app lives in the tray: closing the manager leaves it running, and the tray
 > menu makes a new note, shows or hides every note, reopens the manager and quits.
@@ -59,7 +60,7 @@ closed, and the repository contract answered twice.
 > is turned off, and starting it while it runs brings the running copy forward
 > rather than opening a second.
 >
-> 681 green tests. Start at [LOOP.md](LOOP.md).
+> Start at [LOOP.md](LOOP.md) to see how the automated tests are written.
 
 ## Documentation
 
@@ -72,6 +73,39 @@ closed, and the repository contract answered twice.
 | [docs/sticky-notes-architecture.md](docs/sticky-notes-architecture.md) | The original whiteboard design, transcribed |
 | [docs/sticky-notes-architecture.pdf](docs/sticky-notes-architecture.pdf) | The whiteboard drawing itself |
 | [CLAUDE.md](CLAUDE.md) | Conventions, for Claude Code and for people |
+
+## Editing a note
+
+A note with content opens in **Preview**; a new empty note is ready to type in
+**Edit**. Use the controls inside the note to switch modes. You can also press
+**Enter** in Preview to open Edit and **Escape** in Edit to return to Preview.
+Clicking ordinary text or empty paper in Preview keeps you there. Leaving the
+editor shows the formatted note again. The mode is not saved; the Markdown is
+autosaved after changes.
+
+The formatting bar shows **B**, *I*, **Style** (Normal, H1–H4) and **Link** in both
+modes. On narrow notes it moves below the Edit/Preview controls so every action
+remains visible. In Edit, select text or place the caret, then use the bar.
+**Ctrl+B** and **Ctrl+I** apply the same bold and italic actions. **Undo** and
+**Redo** appear in Edit and use the text editor's history, including changes
+made with the bar. Normal/H1–H4 changes the current line or every line touched by a
+selection. The stored Markdown uses `**bold**`, `*italic*` and `#` through `####`
+for headings; normal style removes a heading prefix.
+
+In Preview, **drag** across text to select it, then use the bar without entering
+Edit. The selected text stays highlighted after a change. B/I and Link require a
+selection; Style changes the lines it touches. A selection through hidden
+Markdown markers, inline code, list or task markers, or a blank line is not
+silently changed. The affected command is disabled when the selection cannot be
+mapped safely to the Markdown. Clicking a link still opens it, and clicking a
+task box still ticks it.
+
+In Edit, selecting plain text and pressing Link inserts `[selected text]()` with
+the caret inside the parentheses for the address. With no selection, Link opens
+a prompt for text and address. Selecting an existing link label lets you edit its
+address. In Preview, select text and press Link to enter the address in a prompt.
+Links accept `http`, `https` and `mailto` addresses. Underline is not part of the
+Markdown subset this app renders.
 
 ## Prerequisites
 

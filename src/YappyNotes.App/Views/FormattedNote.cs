@@ -11,7 +11,7 @@ namespace YappyNotes.App.Views;
 
 /// <summary>
 /// A note's Markdown, drawn formatted: one wrapping line of text per line of the
-/// note.
+/// note. Dragging selects text; clicking it stays in Preview.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -21,15 +21,15 @@ namespace YappyNotes.App.Views;
 /// pointer - the view-model decides what pressing that character does. Nothing
 /// here knows what a checkbox or a link does.
 /// </para>
-/// <para>
-/// It does not select text. Selecting and clicking-to-edit want the same gesture,
-/// and the editor is one press away for anyone who wants to copy.
-/// </para>
+/// <para>Dragging selects visible source text; a press and release still click.</para>
 /// </remarks>
 public sealed class FormattedNote : StackPanel
 {
     public static readonly StyledProperty<IReadOnlyList<NoteLine>?> LinesProperty =
         AvaloniaProperty.Register<FormattedNote, IReadOnlyList<NoteLine>?>(nameof(Lines));
+
+    public static readonly StyledProperty<PreviewSelection?> SelectionProperty =
+        AvaloniaProperty.Register<FormattedNote, PreviewSelection?>(nameof(Selection));
 
     /// <summary>
     /// A row drawn among the lines rather than after them all - the line a new to-do
@@ -49,7 +49,15 @@ public sealed class FormattedNote : StackPanel
     private static readonly IBrush MarkerBrush = new SolidColorBrush(Color.FromRgb(0x44, 0x44, 0x44));
     private static readonly IBrush DoneBrush = new SolidColorBrush(Color.FromRgb(0x6A, 0x6A, 0x6A));
     private static readonly IBrush CodeBrush = new SolidColorBrush(Color.FromArgb(0x18, 0x00, 0x00, 0x00));
+    private static readonly IBrush SelectionBrush = new SolidColorBrush(Color.FromArgb(0x66, 0x2B, 0x6C, 0xC4));
     private static readonly FontFamily Monospace = new("Cascadia Mono, Consolas, DejaVu Sans Mono, Menlo, monospace");
+    private Press? _press;
+
+    private sealed record Press(IPointer Pointer, IReadOnlyList<NoteLine> Lines, int Line, int Boundary,
+        NoteLine ClickLine, int ClickIndex, Point Position)
+    {
+        public bool Dragged { get; set; }
+    }
 
     public FormattedNote()
     {
@@ -63,6 +71,12 @@ public sealed class FormattedNote : StackPanel
     {
         get => GetValue(LinesProperty);
         set => SetValue(LinesProperty, value);
+    }
+
+    public PreviewSelection? Selection
+    {
+        get => GetValue(SelectionProperty);
+        set => SetValue(SelectionProperty, value);
     }
 
     public Control? AddRow
@@ -80,6 +94,10 @@ public sealed class FormattedNote : StackPanel
     /// <summary>A character of a line was pressed.</summary>
     public event EventHandler<LinePressedEventArgs>? LinePressed;
 
+    public event EventHandler<RenderedSelectionEventArgs>? SelectionDragged;
+
+    public event EventHandler? SelectionCleared;
+
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
     {
         base.OnPropertyChanged(change);
@@ -90,6 +108,17 @@ public sealed class FormattedNote : StackPanel
         }
 
         if (change.Property == LinesProperty || change.Property == AddRowProperty || change.Property == AddRowPositionProperty)
+        {
+            if (change.Property == LinesProperty)
+            {
+                _press?.Pointer.Capture(null);
+                _press = null;
+            }
+
+            Rebuild();
+        }
+
+        if (change.Property == SelectionProperty)
         {
             Rebuild();
         }
@@ -105,25 +134,138 @@ public sealed class FormattedNote : StackPanel
         }
 
         var position = e.GetPosition(this);
-
-        foreach (var child in Children)
+        if (Hit(position, clampToNearestLine: false) is { } hit && Lines is { } lines)
         {
-            if (child is not TextBlock { Tag: NoteLine line } text || !text.Bounds.Contains(position))
+            _press = new Press(e.Pointer, lines, hit.LineIndex, hit.Boundary,
+                lines[hit.LineIndex], hit.ClickIndex, position);
+            e.Pointer.Capture(this);
+            e.Handled = true;
+        }
+
+        // Not on a line: left unhandled, for whatever holds the note to answer.
+    }
+
+    protected override void OnPointerMoved(PointerEventArgs e)
+    {
+        base.OnPointerMoved(e);
+        if (_press is not { } press || !ReferenceEquals(press.Lines, Lines))
+        {
+            return;
+        }
+
+        var position = e.GetPosition(this);
+        var dx = position.X - press.Position.X;
+        var dy = position.Y - press.Position.Y;
+        if (!press.Dragged && dx * dx + dy * dy < 9)
+        {
+            return;
+        }
+
+        press.Dragged = true;
+        UpdateDrag(position, press);
+        e.Handled = true;
+    }
+
+    protected override void OnPointerReleased(PointerReleasedEventArgs e)
+    {
+        base.OnPointerReleased(e);
+        if (_press is not { } press)
+        {
+            return;
+        }
+
+        _press = null;
+        e.Pointer.Capture(null);
+        e.Handled = true;
+        if (!ReferenceEquals(press.Lines, Lines))
+        {
+            return;
+        }
+
+        if (press.Dragged)
+        {
+            UpdateDrag(e.GetPosition(this), press);
+        }
+        else
+        {
+            SelectionCleared?.Invoke(this, EventArgs.Empty);
+            LinePressed?.Invoke(this, new LinePressedEventArgs(press.ClickLine, press.ClickIndex));
+        }
+    }
+
+    protected override void OnPointerCaptureLost(PointerCaptureLostEventArgs e)
+    {
+        base.OnPointerCaptureLost(e);
+        _press = null;
+    }
+
+    private void UpdateDrag(Point position, Press press)
+    {
+        if (Hit(position, clampToNearestLine: true) is { } hit)
+        {
+            SelectionDragged?.Invoke(this,
+                new RenderedSelectionEventArgs(press.Line, press.Boundary, hit.LineIndex, hit.Boundary));
+        }
+    }
+
+    private (int LineIndex, int Boundary, int ClickIndex)? Hit(Point position, bool clampToNearestLine)
+    {
+        var lines = Lines;
+        if (lines is null)
+        {
+            return null;
+        }
+
+        TextBlock? nearest = null;
+        var nearestDistance = double.PositiveInfinity;
+        foreach (var text in Children.OfType<TextBlock>())
+        {
+            if (text.Tag is not NoteLine line)
             {
                 continue;
             }
 
-            var hit = text.TextLayout.HitTestPoint(position - text.Bounds.Position);
+            if (text.Bounds.Contains(position))
+            {
+                nearest = text;
+                break;
+            }
 
-            // Past the end of the line's text there is no character under the
-            // pointer, so no box or link either: it is a press at the line's end.
-            var index = hit.IsInside ? hit.TextPosition : DrawnLength(line);
-            LinePressed?.Invoke(this, new LinePressedEventArgs(line, index, hit.IsInside && hit.IsTrailing));
-            e.Handled = true;
-            return;
+            var distance = position.Y < text.Bounds.Top ? text.Bounds.Top - position.Y
+                : Math.Max(0, position.Y - text.Bounds.Bottom);
+            if (distance < nearestDistance)
+            {
+                nearest = text;
+                nearestDistance = distance;
+            }
         }
 
-        // Not on a line: left unhandled, for whatever holds the note to answer.
+        if (nearest is null || (!clampToNearestLine && !nearest.Bounds.Contains(position))
+            || nearest.Tag is not NoteLine chosen)
+        {
+            return null;
+        }
+
+        var lineIndex = -1;
+        for (var i = 0; i < lines.Count; i++)
+        {
+            if (ReferenceEquals(lines[i], chosen))
+            {
+                lineIndex = i;
+                break;
+            }
+        }
+
+        if (lineIndex < 0)
+        {
+            return null;
+        }
+
+        var hit = nearest.TextLayout.HitTestPoint(position - nearest.Bounds.Position);
+        var length = DrawnLength(chosen);
+        var clickIndex = hit.IsInside ? hit.TextPosition : length;
+        var boundary = Math.Clamp(hit.TextPosition + (hit.IsTrailing ? 1 : 0), 0, length);
+        return (lineIndex, boundary, clickIndex);
     }
 
     private static int DrawnLength(NoteLine line) => line.Marker.Length + line.Block.Runs.Sum(run => run.Text.Length);
@@ -154,16 +296,16 @@ public sealed class FormattedNote : StackPanel
         {
             if (row is not null && i < before)
             {
-                Children.Insert(i, Draw(lines[i]));
+                Children.Insert(i, Draw(lines[i], Selection));
             }
             else
             {
-                Children.Add(Draw(lines[i]));
+                Children.Add(Draw(lines[i], Selection));
             }
         }
     }
 
-    private static TextBlock Draw(NoteLine line)
+    private static TextBlock Draw(NoteLine line, PreviewSelection? selection)
     {
         var block = line.Block;
         var text = new TextBlock
@@ -185,7 +327,35 @@ public sealed class FormattedNote : StackPanel
 
         foreach (var run in block.Runs)
         {
-            text.Inlines!.Add(Draw(run, line));
+            var selectedStart = Math.Max(selection?.Start ?? 0, run.SourceStart);
+            var selectedEnd = Math.Min(selection?.End ?? 0, run.SourceStart + run.Text.Length);
+            if (selectedStart >= selectedEnd)
+            {
+                text.Inlines!.Add(Draw(run, line));
+                continue;
+            }
+
+            if (selectedStart > run.SourceStart)
+            {
+                text.Inlines!.Add(Draw(run with { Text = run.Text[..(selectedStart - run.SourceStart)] }, line));
+            }
+
+            var highlighted = Draw(run with
+            {
+                Text = run.Text[(selectedStart - run.SourceStart)..(selectedEnd - run.SourceStart)],
+                SourceStart = selectedStart,
+            }, line);
+            highlighted.Background = SelectionBrush;
+            text.Inlines!.Add(highlighted);
+
+            if (selectedEnd < run.SourceStart + run.Text.Length)
+            {
+                text.Inlines!.Add(Draw(run with
+                {
+                    Text = run.Text[(selectedEnd - run.SourceStart)..],
+                    SourceStart = selectedEnd,
+                }, line));
+            }
         }
 
         return text;
@@ -242,11 +412,18 @@ public sealed class FormattedNote : StackPanel
     };
 }
 
-public sealed class LinePressedEventArgs(NoteLine line, int drawnIndex, bool trailing) : EventArgs
+public sealed class LinePressedEventArgs(NoteLine line, int drawnIndex) : EventArgs
 {
     public NoteLine Line { get; } = line;
 
     public int DrawnIndex { get; } = drawnIndex;
 
-    public bool Trailing { get; } = trailing;
+}
+
+public sealed class RenderedSelectionEventArgs(int anchorLine, int anchorBoundary, int focusLine, int focusBoundary) : EventArgs
+{
+    public int AnchorLine { get; } = anchorLine;
+    public int AnchorBoundary { get; } = anchorBoundary;
+    public int FocusLine { get; } = focusLine;
+    public int FocusBoundary { get; } = focusBoundary;
 }

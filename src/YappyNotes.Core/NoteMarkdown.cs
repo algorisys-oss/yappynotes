@@ -207,6 +207,15 @@ public static class NoteMarkdown
         {
             var c = content[i];
 
+            if (c == '\\' && i + 1 < end && content[i + 1] is '[' or ']' or '\\')
+            {
+                Plain(content, plainStart, i, style, runs);
+                runs.Add(new MarkdownRun(content.Substring(i + 1, 1), i + 1, style));
+                i += 2;
+                plainStart = i;
+                continue;
+            }
+
             if (addresses.TryGetValue(i, out var address))
             {
                 Plain(content, plainStart, i, style, runs);
@@ -248,7 +257,12 @@ public static class NoteMarkdown
             if (c is '*' or '_' && TryEmphasis(content, i, start, end, out var width, out var closer))
             {
                 Plain(content, plainStart, i, style, runs);
-                var emphasis = width == 2 ? RunStyle.Bold : RunStyle.Italic;
+                var emphasis = width switch
+                {
+                    3 => RunStyle.Bold | RunStyle.Italic,
+                    2 => RunStyle.Bold,
+                    _ => RunStyle.Italic,
+                };
                 ParseInlines(content, i + width, closer, style | emphasis, runs, dates);
                 i = closer + width;
                 plainStart = i;
@@ -315,7 +329,11 @@ public static class NoteMarkdown
     {
         uri = null;
         linkEnd = -1;
-        labelEnd = content.IndexOf(']', open + 1, end - open - 1);
+        labelEnd = open + 1;
+        while (labelEnd < end && (content[labelEnd] != ']' || content[labelEnd - 1] == '\\'))
+        {
+            labelEnd++;
+        }
 
         if (labelEnd <= open + 1 || labelEnd + 1 >= end || content[labelEnd + 1] != '(')
         {
@@ -357,7 +375,9 @@ public static class NoteMarkdown
     private static bool TryEmphasis(string content, int open, int lineStart, int end, out int width, out int close)
     {
         var marker = content[open];
-        width = open + 1 < end && content[open + 1] == marker ? 2 : 1;
+        width = open + 2 < end && content[open + 1] == marker && content[open + 2] == marker
+            ? 3
+            : open + 1 < end && content[open + 1] == marker ? 2 : 1;
         close = -1;
 
         var textStart = open + width;
